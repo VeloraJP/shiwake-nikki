@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<title>汎用仕訳日記帳</title>
+<link rel="stylesheet" href="style.css?v=24">
+</head>
+<body>
+<header>
+  <h1>仕訳日記帳 <span class="version">v24</span></h1>
+  <div class="company-switch">
+    <label for="company-select">会社</label>
+    <select id="company-select"></select>
+    <span id="company-period" class="muted"></span>
+  </div>
+</header>
+
+<nav id="tabs">
+  <button data-tab="entry" class="tab-btn active">仕訳入力</button>
+  <button data-tab="list" class="tab-btn">仕訳一覧</button>
+  <button data-tab="trial" class="tab-btn">試算表</button>
+  <button data-tab="export" class="tab-btn">出力・取込</button>
+  <button data-tab="masters" class="tab-btn">マスタ</button>
+  <button data-tab="settings" class="tab-btn">会社・設定</button>
+</nav>
+
+<main>
+  <p id="no-company" class="notice" hidden>会社データがありません。「会社・設定」タブで会社名と会計期間を登録してください。</p>
+
+  <!-- 仕訳入力 -->
+  <section id="tab-entry" class="tab-page">
+    <div id="edit-banner" class="notice" hidden>編集中の仕訳があります。<button id="edit-cancel" type="button">編集をやめる</button></div>
+    <form id="entry-form" autocomplete="off">
+      <div class="grid">
+        <label>日付
+          <input type="text" class="date-input" id="e-date" placeholder="2026-04-01" inputmode="numeric" autocomplete="off" required>
+        </label>
+        <label>伝票番号
+          <input type="number" id="e-voucher" readonly>
+        </label>
+      </div>
+      <div class="side-grid">
+      <fieldset>
+        <legend>借方</legend>
+        <div class="grid">
+          <label>勘定科目
+            <select id="e-debit-select" class="account-select"><option value="">科目を選択</option></select>
+            <input type="text" id="e-debit-name" list="account-list" placeholder="科目名（直接入力も可）">
+          </label>
+          <label>税区分
+            <select id="e-debit-tax"></select>
+          </label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>貸方</legend>
+        <div class="grid">
+          <label>勘定科目
+            <select id="e-credit-select" class="account-select"><option value="">科目を選択</option></select>
+            <input type="text" id="e-credit-name" list="account-list" placeholder="科目名（直接入力も可）">
+          </label>
+          <label>税区分
+            <select id="e-credit-tax"></select>
+          </label>
+        </div>
+      </fieldset>
+      </div>
+      <datalist id="account-list"></datalist>
+      <div class="grid">
+        <label>金額（税込）
+          <input type="number" id="e-amount" min="1" step="1" inputmode="numeric" placeholder="0">
+        </label>
+        <label>摘要
+          <input type="text" id="e-summary" placeholder="摘要">
+        </label>
+      </div>
+      <p id="entry-msg" class="msg"></p>
+      <div class="btn-row">
+        <button type="button" id="save-continue">保存して続き（同一取引）</button>
+        <button type="button" id="save-new">保存して別（新しい取引）</button>
+      </div>
+      <div class="btn-row sub">
+        <button type="button" id="copy-prev">前行コピー</button>
+      </div>
+    </form>
+
+    <details class="templates">
+      <summary>仕訳テンプレート</summary>
+      <div class="grid">
+        <label>テンプレート
+          <select id="tpl-select"></select>
+        </label>
+        <div class="btn-row">
+          <button type="button" id="tpl-apply">呼び出す</button>
+          <button type="button" id="tpl-delete">削除</button>
+        </div>
+      </div>
+      <div class="grid">
+        <label>テンプレート名
+          <input type="text" id="tpl-name" placeholder="名前">
+        </label>
+        <div class="btn-row">
+          <button type="button" id="tpl-save">現在の入力を保存</button>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <!-- 仕訳一覧 -->
+  <section id="tab-list" class="tab-page" hidden>
+    <div class="grid filters">
+      <label>開始日 <input type="text" class="date-input" id="f-from" placeholder="2026-04-01" inputmode="numeric" autocomplete="off"></label>
+      <label>終了日 <input type="text" class="date-input" id="f-to" placeholder="2026-04-01" inputmode="numeric" autocomplete="off"></label>
+      <label>キーワード <input type="text" id="f-keyword" placeholder="摘要・科目名・金額・日付・伝票番号（スペースで複数条件）"></label>
+      <label>絞り込み
+        <select id="f-status">
+          <option value="all">すべて</option>
+          <option value="none">未出力のみ</option>
+          <option value="any">出力済みあり</option>
+          <option value="flagged">要確認のみ</option>
+        </select>
+      </label>
+    </div>
+    <p id="list-count" class="muted"></p>
+    <p id="flag-info" class="muted"></p>
+    <p class="muted">要確認チェック：伝票内で諸口の貸借が合わない・会計期間外の日付の仕訳には「要確認」、税区分の向きが逆転している・借方と貸方で税率が異なる仕訳には「確認推奨」のバッジが各行に出ます。チェック自体は仕訳を保存した時点で自動で行われます。</p>
+    <div class="table-wrap">
+      <table id="journal-table">
+        <thead>
+          <tr><th>日付</th><th>伝票</th><th>借方</th><th>貸方</th><th class="num">金額</th><th>摘要</th><th>出力</th><th></th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 出力・取込 -->
+  <section id="tab-trial" class="tab-page" hidden>
+    <h2>試算表</h2>
+    <div class="grid">
+      <label>開始日 <input type="text" id="tb-from" class="date-input" placeholder="YYYY-MM-DD" inputmode="numeric"></label>
+      <label>終了日 <input type="text" id="tb-to" class="date-input" placeholder="YYYY-MM-DD" inputmode="numeric"></label>
+    </div>
+    <p class="muted">選択中の会社の仕訳を、勘定科目ごとに集計した合計残高試算表です。日付は会社の会計期間で初期表示され、変更するとその期間で集計し直します。金額はすべて税込の記帳金額です。紙面はA4横の形で、左半分が貸借対照表（資産・負債・純資産）、右半分が損益計算書（収益・費用）です。紙面は画面の幅に収まる大きさで表示されます。試算表だけを拡大したいときは、紙面の上での二本指操作か、下の＋／−ボタンを使ってください（ページ全体は拡大されません）。拡大した紙面は、枠の中でスクロールして動かせます。</p>
+    <div class="btn-row tb-zoom-bar">
+      <button type="button" id="tb-zoom-out">− 縮小</button>
+      <button type="button" id="tb-zoom-fit">全体表示</button>
+      <button type="button" id="tb-zoom-in">＋ 拡大</button>
+      <span id="tb-zoom-label" class="muted"></span>
+    </div>
+    <div id="tb-fit" class="tb-fit">
+    <div class="tb-sizer" id="tb-sizer">
+    <div class="tb-paper" id="tb-paper">
+      <div class="tb-title">合計残高試算表</div>
+      <div class="tb-meta"><span id="tb-co-name"></span><span id="tb-period-text"></span></div>
+      <div class="tb-unit">（単位：円）</div>
+      <div class="tb-cols">
+        <div class="tb-col">
+          <div class="tb-col-title">貸借対照表</div>
+          <table class="tb-table">
+            <thead>
+              <tr><th>勘定科目</th><th class="num">期首残高</th><th class="num">借方合計</th><th class="num">貸方合計</th><th class="num">期末残高</th></tr>
+            </thead>
+            <tbody id="tb-body-bs"></tbody>
+            <tfoot id="tb-foot-bs"></tfoot>
+          </table>
+        </div>
+        <div class="tb-col">
+          <div class="tb-col-title">損益計算書</div>
+          <table class="tb-table">
+            <thead>
+              <tr><th>勘定科目</th><th class="num">期首残高</th><th class="num">借方合計</th><th class="num">貸方合計</th><th class="num">期末残高</th></tr>
+            </thead>
+            <tbody id="tb-body-pl"></tbody>
+            <tfoot id="tb-foot-pl"></tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+    </div>
+    </div>
+    <p id="tb-empty" class="muted" hidden>対象期間に仕訳がありません。</p>
+    <div id="tb-pl" hidden>
+      <h3>損益の目安</h3>
+      <div class="table-wrap">
+        <table class="tb-table">
+          <tbody>
+            <tr><td>収益の残高合計</td><td class="num" id="tb-revenue"></td></tr>
+            <tr><td>費用の残高合計</td><td class="num" id="tb-expense"></td></tr>
+            <tr><td>差額（収益 − 費用）</td><td class="num" id="tb-profit"></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted">科目マスタの区分（収益・費用）で集計した簡易な目安です。税込経理の金額で計算しているため、確定申告の損益とは一致しません。</p>
+    </div>
+    <h3>期首残高の入力</h3>
+    <p class="muted">資産・負債・純資産の科目について、期首時点の残高を入力します（変更すると自動で保存されます）。試算表の期末残高は、この期首残高に期間中の動きを加えた金額です。合計科目は集計専用のため、ここには出ません。</p>
+    <div class="table-wrap">
+      <table class="tb-table" id="ob-table">
+        <thead>
+          <tr><th>勘定科目</th><th class="num">期首借方残高</th><th class="num">期首貸方残高</th></tr>
+        </thead>
+        <tbody id="ob-body"></tbody>
+      </table>
+    </div>
+    <p id="ob-diff" class="muted"></p>
+    <h3>翌期への繰越</h3>
+    <p class="muted">期末残高（会社の会計期間を通じた残高）を翌期の期首残高として、次期の会社データを新規に作成します。当期の損益は「繰越利益剰余金」の期首残高に含めます。仕訳そのものは引き継ぎません。</p>
+    <div class="btn-row"><button type="button" id="tb-carry">期末残高を翌期へ繰り越す</button></div>
+    <p id="tb-msg" class="muted"></p>
+    <p class="muted">この試算表は入力した仕訳の簡易な集計であり、税法で定められた帳簿の要件を満たすものではありません。</p>
+  </section>
+
+  <section id="tab-export" class="tab-page" hidden>
+    <h2>出力</h2>
+    <div class="grid">
+      <label>出力形式
+        <select id="x-format">
+          <option value="transfer">転送ファイル（本ツール専用JSON）</option>
+          <option value="freee">freee</option>
+          <option value="epson">エプソン財務会計</option>
+          <option value="jdl">JDL</option>
+          <option value="yayoi">弥生会計</option>
+          <option value="mf">マネーフォワード クラウド会計</option>
+          <option value="pca">PCA会計</option>
+          <option value="obc">勘定奉行</option>
+        </select>
+      </label>
+      <label>開始日 <input type="text" class="date-input" id="x-from" placeholder="2026-04-01" inputmode="numeric" autocomplete="off"></label>
+      <label>終了日 <input type="text" class="date-input" id="x-to" placeholder="2026-04-01" inputmode="numeric" autocomplete="off"></label>
+    </div>
+    <label class="check">
+      <input type="checkbox" id="x-include"> 出力済みの仕訳も含める（通常は未出力のみ）
+    </label>
+    <label class="check">
+      <input type="checkbox" id="x-marker"> 要確認の仕訳は摘要の先頭に「【要確認】」を付けて出力する（取り込み先でも見分けられます）
+    </label>
+    <p class="muted">freeeでは、同じ日付・同じ伝票番号の取引が既に登録されているとインポート時にエラーになります。出力済みの仕訳を再出力して取り込む場合はご注意ください。</p>
+    <p class="muted">弥生会計では、勘定科目は名称で照合されます。取り込み先の弥生の科目名と異なる場合は、取り込み時にマッチングリストが表示されます。税金額は内税額を計算して出力します。</p>
+    <p class="muted">マネーフォワードでは、伝票番号が同じ行は1つの複合仕訳として取り込まれます。インポートのたびに新しい仕訳として登録されるため、取り込み済みの仕訳を再出力して取り込むと重複します。</p>
+    <p class="muted">PCA会計では、「汎用データの受入」で項目名から自動判定して取り込みます。科目コード・税区分コードは初期値を持たないため、取り込み先の事業所に合わせて科目マスタ・税区分マスタで登録してください（未設定でも警告のうえ出力できます）。PCAは受入履歴を管理しないため、取り込み済みの仕訳を再出力して取り込むと重複します。</p>
+    <p class="muted">勘定奉行では、「汎用データの受入」でOBC受入形式として取り込みます（デスクトップ版が対象です）。科目コード・税区分コードは初期値を持たないため、科目マスタ・税区分マスタで登録してください（未設定でも警告のうえ出力できます）。</p>
+    <h3>対応形式と検証状況</h3>
+    <p class="muted">各形式は下記の公開資料等に基づいて作成していますが、実際の会計ソフトでの取り込み検証は未実施です。取り込み結果は必ず取り込み先で確認してください。</p>
+    <p class="muted">なお、このツール自体は、税法で定められた帳簿の要件（電子帳簿保存法に基づく保存要件など）を満たすものではありません。正式な帳簿は、取り込み先の会計ソフト側で作成・保存してください。</p>
+    <div class="table-wrap">
+      <table class="verify-table">
+        <thead><tr><th>形式</th><th>根拠</th><th>実機検証</th><th>主な未確認点</th></tr></thead>
+        <tbody>
+          <tr><td>freee</td><td>公開テンプレートの並び（[表題行]／[明細行]）</td><td>未実施</td><td>テンプレート実物との列順の完全照合</td></tr>
+          <tr><td>エプソン財務会計</td><td>実績のある30列の並び</td><td>未実施</td><td>課税仕入パターンとK8表記の取り込み可否</td></tr>
+          <tr><td>JDL</td><td>実績のある16列の並び</td><td>未実施</td><td>日付表記と番号の開始値</td></tr>
+          <tr><td>弥生会計</td><td>公開資料「仕訳データの項目と記述形式」の並び</td><td>未実施</td><td>文字コードの公式明記がないためShift_JISで出力</td></tr>
+          <tr><td>マネーフォワード</td><td>公開資料「『仕訳帳』をインポートする」の並び</td><td>未実施</td><td>文字コードの公式明記がないためShift_JISで出力</td></tr>
+          <tr><td>PCA会計</td><td>公開資料『汎用データレイアウト』の並び</td><td>未実施</td><td>項目名の部分集合（先頭30列）での自動判定受入</td></tr>
+          <tr><td>勘定奉行</td><td>公開資料（サポート技術情報・ヘルプの形式表）で確認した並び</td><td>未実施</td><td>勘定奉行クラウドでOBC受入形式がそのまま使えるか</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p id="x-count" class="muted"></p>
+    <div class="btn-row">
+      <button type="button" id="x-run">出力する</button>
+    </div>
+    <p id="x-msg" class="msg"></p>
+
+    <h2>転送ファイル取り込み</h2>
+    <p class="muted">スマホ等で出力した転送ファイル（JSON）を、この会社のデータに取り込みます。会社名・会計期間が一致しないファイルは取り込めません。同じ仕訳IDは二重に取り込みません。</p>
+    <input type="file" id="import-file" accept=".json,application/json">
+    <p id="import-msg" class="msg"></p>
+  </section>
+
+  <!-- マスタ -->
+  <section id="tab-masters" class="tab-page" hidden>
+    <h2>勘定科目</h2>
+    <p class="muted" id="master-note">科目名は初期設定されています。各会計ソフト用のコード（エプソン用・JDL用・PCA用・勘定奉行用）と税区分の番号は初期値を持たないため、必要なものは各欄に入力してください。表は横にスクロールできますが、科目名の列は左端に固定されます。</p>
+    <div class="table-wrap">
+      <table id="account-table">
+        <thead>
+          <tr><th>科目名</th><th>エプソン用コード</th><th>JDL用コード</th><th>PCA用コード</th><th>勘定奉行用コード</th><th>初期税区分</th><th>区分</th><th>種別</th><th>合計先</th><th></th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="grid">
+      <label>新しい科目名 <input type="text" id="acc-new-name"></label>
+      <label>区分 <select id="acc-new-category">
+        <option value="asset">資産</option>
+        <option value="liability">負債</option>
+        <option value="equity">純資産</option>
+        <option value="revenue">収益</option>
+        <option value="expense">費用</option>
+      </select></label>
+      <label>種別 <select id="acc-new-kind">
+        <option value="normal">通常科目</option>
+        <option value="total">合計科目</option>
+      </select></label>
+      <label>合計先 <select id="acc-new-parent">
+        <option value="">なし</option>
+      </select></label>
+      <div class="btn-row"><button type="button" id="acc-add">科目を追加</button></div>
+    </div>
+
+    <h2>税区分</h2>
+    <div class="table-wrap">
+      <table id="tax-table">
+        <thead>
+          <tr><th>名称</th><th>freee 税区分名</th><th>エプソン 課税区分</th><th>エプソン 税区分</th><th>JDL 課区</th><th>JDL 税区</th><th>弥生 税区分</th><th>マネーフォワード 税区分</th><th>PCA 税区分コード</th><th>PCA 税区分名</th><th>勘定奉行 税区分コード</th><th></th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="grid">
+      <label>新しい税区分名 <input type="text" id="tax-new-name"></label>
+      <div class="btn-row"><button type="button" id="tax-add">税区分を追加</button></div>
+    </div>
+    <p id="master-msg" class="msg"></p>
+  </section>
+
+  <!-- 会社・設定 -->
+  <section id="tab-settings" class="tab-page" hidden>
+    <h2>会社の登録・編集</h2>
+    <form id="company-form" autocomplete="off">
+      <div class="grid">
+        <label>会社名 <input type="text" id="c-name" required></label>
+        <label>会計期間 開始日 <input type="text" class="date-input" id="c-start" placeholder="2026-04-01" inputmode="numeric" autocomplete="off" required></label>
+        <label>会計期間 終了日 <input type="text" class="date-input" id="c-end" placeholder="2026-04-01" inputmode="numeric" autocomplete="off" required></label>
+      </div>
+      <div class="btn-row">
+        <button type="submit" id="c-save">新しい会社として登録</button>
+        <button type="button" id="c-update">現在の会社を更新</button>
+        <button type="button" id="c-delete">現在の会社を削除</button>
+      </div>
+    </form>
+    <p id="company-msg" class="msg"></p>
+
+    <h2>バックアップ / 復元</h2>
+    <p class="muted">全会社のデータをJSONで保存します。復元すると現在のデータは置き換わります。</p>
+    <div class="btn-row">
+      <button type="button" id="backup-run">バックアップをダウンロード</button>
+    </div>
+    <label>復元ファイル <input type="file" id="restore-file" accept=".json,application/json"></label>
+    <p id="backup-msg" class="msg"></p>
+  </section>
+</main>
+
+<footer class="muted">データはこの端末の中（localStorage）にだけ保存されます。サーバーには送信されません。</footer>
+
+<script type="module" src="app.js?v=24"></script>
+</body>
+</html>

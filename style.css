@@ -1,0 +1,236 @@
+/* v4 themes: PC = corporate slate + teal (compact), smartphone = dark navy + sky.
+   One variable set drives all components; the small-screen media query
+   swaps the variables to the dark theme. Light color-scheme is declared so
+   native controls are never recolored unpredictably. */
+:root {
+  color-scheme: light;
+  --bg: #e8ecef;
+  --card: #ffffff;
+  --ink: #1f2a33;
+  --sub: #5f7183;
+  --line: #c3ced6;
+  --accent: #0f766e;
+  --accent-ink: #ffffff;
+  --hd-bg: #1f2a33;
+  --hd-ink: #ffffff;
+  --hd-sub: #a7b6c2;
+  --hd-sel-bg: #2c3a45;
+  --hd-sel-ink: #ffffff;
+  --hd-sel-line: #43545f;
+  --in-bg: #ffffff;
+  --ro-bg: #eef1f3;
+  --fs-bg: #f2f6f6;
+  --th-bg: #e6f2f0;
+  --focus: rgba(15, 118, 110, 0.20);
+  --badge-bg: #ecfdf5;
+  --badge-line: #a7f3d0;
+  --badge-ink: #047857;
+  --notice-bg: #fffbeb;
+  --notice-line: #fde68a;
+  --err: #dc2626;
+  --ok: #059669;
+  --radius: 8px;
+  --radius-in: 6px;
+  --main-pad: 18px;
+  --in-pad: 8px 10px;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic", Meiryo, sans-serif;
+  margin: 0 auto;
+  max-width: 960px;
+  padding: 14px;
+  color: var(--ink);
+  background: var(--bg);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+header {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+  background: var(--hd-bg); color: var(--hd-ink);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+}
+header h1 { font-size: 19px; margin: 0; font-weight: 800; letter-spacing: 0.08em; color: var(--hd-ink); }
+.company-switch { margin-left: auto; display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--hd-ink); }
+.company-switch label { color: var(--hd-ink); font-size: 13px; font-weight: 600; }
+.company-switch select {
+  width: auto; min-width: 150px;
+  background: var(--hd-sel-bg); color: var(--hd-sel-ink); border: 1px solid var(--hd-sel-line);
+}
+header .muted { color: var(--hd-sub); }
+nav#tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
+.tab-btn {
+  border: 1px solid var(--line); background: var(--card); color: var(--sub);
+  padding: 8px 16px; cursor: pointer; font-size: 14px; font-weight: 700; border-radius: var(--radius-in);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.tab-btn:hover { border-color: var(--accent); color: var(--accent); }
+.tab-btn.active { background: var(--accent); border-color: transparent; color: var(--accent-ink); -webkit-text-fill-color: var(--accent-ink); }
+main {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: var(--main-pad); box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+}
+h2 { font-size: 16px; font-weight: 800; border-bottom: 2px solid var(--line); padding-bottom: 6px; margin-top: 26px; }
+fieldset { border: 1px solid var(--line); border-radius: var(--radius-in); margin: 12px 0; background: var(--fs-bg); padding: 12px 14px; }
+legend { padding: 2px 10px; color: var(--accent-ink); -webkit-text-fill-color: var(--accent-ink); background: var(--accent); border-radius: 4px; font-size: 12px; font-weight: 700; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 8px 0; }
+/* Grid items default to min-width:auto and refuse to shrink below a wide
+   control's intrinsic width, which pushed fields out of the card.
+   Allow items and controls to shrink to the track width. */
+.grid > * { min-width: 0; }
+label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 700; color: var(--sub); }
+input, select {
+  font-size: 16px; padding: var(--in-pad); border: 1px solid var(--line); border-radius: var(--radius-in);
+  background: var(--in-bg); color: var(--ink); width: 100%; min-width: 0; max-width: 100%; font-weight: 400;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
+input.invalid { border-color: var(--err); box-shadow: 0 0 0 3px color-mix(in srgb, var(--err) 18%, transparent); }
+input[readonly] { background: var(--ro-bg); color: var(--sub); }
+.account-select { display: block; font-weight: 600; }
+button {
+  font-size: 15px; font-weight: 700; padding: 10px 18px;
+  border: 1px solid var(--line); border-radius: var(--radius-in); background: var(--card);
+  color: var(--ink); -webkit-text-fill-color: var(--ink); cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+button:hover { border-color: var(--sub); }
+.btn-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; align-items: end; }
+#save-new { background: var(--accent); border-color: transparent; color: var(--accent-ink); -webkit-text-fill-color: var(--accent-ink); }
+#save-new:hover { filter: brightness(1.08); }
+#save-continue { border: 2px solid var(--accent); color: var(--accent); -webkit-text-fill-color: var(--accent); background: var(--card); }
+#c-save { border: 2px solid var(--ink); background: var(--card); color: var(--ink); -webkit-text-fill-color: var(--ink); }
+.btn-row.sub button { font-size: 13px; padding: 7px 12px; }
+.msg { color: var(--err); min-height: 1.2em; white-space: pre-wrap; font-size: 14px; }
+.msg.ok { color: var(--ok); }
+.muted { color: var(--sub); font-size: 13px; }
+.notice { background: var(--notice-bg); border: 1px solid var(--notice-line); border-radius: var(--radius-in); padding: 10px 12px; }
+.check { flex-direction: row; align-items: center; gap: 8px; font-size: 14px; color: var(--ink); font-weight: 400; }
+.check input { width: auto; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius-in); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: middle; }
+th { background: var(--th-bg); color: var(--ink); font-weight: 700; }
+tr:last-child td { border-bottom: none; }
+td.num, th.num { text-align: right; }
+td input, td select { font-size: 13px; padding: 6px 8px; }
+.badge {
+  display: inline-block; border: 1px solid var(--badge-line); border-radius: 999px;
+  font-size: 11px; font-weight: 700; padding: 1px 8px; margin-right: 4px;
+  background: var(--badge-bg); color: var(--badge-ink);
+}
+.badge.flag-strong { background: #b91c1c; border-color: #b91c1c; color: #fff; }
+.badge.flag-weak { background: #b45309; border-color: #b45309; color: #fff; }
+.version { font-size: 12px; font-weight: 400; opacity: 0.65; }
+.verify-table { font-size: 12px; }
+.row-btns { white-space: nowrap; }
+.row-btns button { font-size: 12px; padding: 5px 10px; }
+details.templates { margin-top: 20px; border-top: 1px solid var(--line); padding-top: 10px; }
+footer { margin-top: 12px; }
+
+/* PC: debit and credit side by side */
+@media (min-width: 601px) {
+  .side-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+  .side-grid fieldset { margin: 0; }
+  .side-grid .grid { grid-template-columns: 1fr; }
+}
+
+/* Smartphone: dark theme (navy + sky) */
+@media (max-width: 600px) {
+  :root {
+    --bg: #0c1322;
+    --card: #131e33;
+    --ink: #e9eef7;
+    --sub: #8fa1ba;
+    --line: #263650;
+    --accent: #38bdf8;
+    --accent-ink: #082f49;
+    --hd-bg: #101a2e;
+    --hd-ink: #e9eef7;
+    --hd-sub: #8fa1ba;
+    --hd-sel-bg: #0e1729;
+    --hd-sel-ink: #e9eef7;
+    --hd-sel-line: #263650;
+    --in-bg: #0e1729;
+    --ro-bg: #0a1120;
+    --fs-bg: #101a2e;
+    --th-bg: #16233c;
+    --focus: rgba(56, 189, 248, 0.28);
+    --badge-bg: rgba(16, 185, 129, 0.14);
+    --badge-line: rgba(16, 185, 129, 0.45);
+    --badge-ink: #34d399;
+    --notice-bg: #26200d;
+    --notice-line: #6b5518;
+    --err: #f87171;
+    --ok: #34d399;
+    --radius: 14px;
+    --radius-in: 10px;
+    --main-pad: 16px;
+    --in-pad: 11px 12px;
+  }
+  body { padding: 10px; }
+  /* Date fields are plain text inputs (native date widgets proved
+     unreliable across browsers); keep a comfortable tap height. */
+  .date-input { min-height: 44px; }
+  .btn-row button { flex: 1 1 100%; }
+  header { padding: 14px 16px; }
+  .company-switch { margin-left: 0; }
+  .company-switch select { min-width: 120px; }
+  header .muted { white-space: nowrap; font-size: 11px; }
+  .tab-btn { border-radius: 999px; }
+  legend { border-radius: 999px; }
+}
+
+/* Trial balance (v18) */
+.tb-table tfoot td { font-weight: 700; }
+#tb-pl .tb-table { max-width: 420px; }
+
+/* Trial balance as a paper document (v18): white sheet, ruled table,
+   meant to read like the form an accounting office hands over. */
+.tb-paper { background: #ffffff; color: #111111; border-radius: 6px; padding: 20px 16px; margin-top: 12px; box-shadow: 0 1px 5px rgba(0, 0, 0, .3); }
+.tb-title { text-align: center; font-size: 19px; font-weight: 700; letter-spacing: .35em; text-indent: .35em; }
+.tb-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 12px; font-size: 13px; }
+.tb-unit { text-align: right; font-size: 11px; margin-top: 2px; }
+.tb-paper .tb-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+.tb-paper .tb-table th, .tb-paper .tb-table td { border: 1px solid #444444; padding: 5px 8px; }
+.tb-paper .tb-table thead th { background: #e9e9e9; text-align: center; }
+.tb-paper .tb-table td.num { font-variant-numeric: tabular-nums; }
+.tb-paper .tb-table tfoot td { border-top: 3px double #111111; font-weight: 700; }
+
+/* v19: total-account rows on the paper, opening-balance inputs */
+.tb-paper .tb-total-row td { font-weight: 700; background: #f0f0f0; }
+#ob-table input { width: 120px; text-align: right; }
+
+/* v20: trial-balance paper — colour and ruled emphasis for readability */
+.tb-paper .tb-table { border: 2px solid #2b2b2b; }
+.tb-paper .tb-table thead th { background: #2f4b7c; color: #ffffff; border-color: #24405f; }
+.tb-paper .tb-band td { background: #c9d6ea; font-weight: 700; letter-spacing: .25em; border-color: #7d94b5; }
+.tb-paper .tb-row-alt td { background: #f4f7fb; }
+.tb-paper .tb-total-row td { background: #dfe8f5; border-top: 2px solid #2f4b7c; border-bottom: 2px solid #2f4b7c; }
+.tb-paper .tb-table tfoot td { background: #c9d6ea; }
+
+/* v21: trial-balance fit-to-width display, sticky master name column */
+.tb-fit { overflow: auto; }
+.tb-fit.scroll { overflow-x: auto; }
+.tb-fit .tb-paper { width: 760px; max-width: none; margin-inline: auto; transform-origin: top left; }
+.tb-view-row button.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+#account-table th:first-child, #account-table td:first-child {
+  position: sticky; left: 0; background: var(--card); z-index: 1; min-width: 128px;
+}
+
+/* v22: A4-landscape sheet (BS left / PL right), fitted to the screen */
+.tb-fit .tb-paper { width: 1120px; min-height: 794px; }
+.tb-cols { display: flex; gap: 20px; margin-top: 10px; }
+.tb-col { flex: 1 1 0; min-width: 0; }
+.tb-col-title { text-align: center; font-weight: 700; letter-spacing: .3em; text-indent: .3em; background: #c9d6ea; border: 1px solid #7d94b5; padding: 5px 0; margin-bottom: 6px; }
+.tb-paper .tb-table { font-size: 12px; }
+.tb-paper .tb-table th, .tb-paper .tb-table td { padding: 4px 6px; }
+
+/* v24: sheet-only zoom — the scaled sheet sits in a sized box inside a
+   scrollable frame, so zooming never magnifies the whole page. */
+.tb-sizer { position: relative; margin-inline: auto; }
+.tb-sizer .tb-paper { margin-inline: 0; }
+.tb-zoom-bar { align-items: center; }
