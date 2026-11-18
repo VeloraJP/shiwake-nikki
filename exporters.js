@@ -147,11 +147,20 @@ function ymd(dateStr) {
   return { y, m, d, slash: `${y}/${m}/${d}`, plain: `${y}${m}${d}` };
 }
 
-// ---------- Epson (30 columns, no header; per the proven macro layout) ----------
-
-// Fields that are always double-quoted in the proven output (1-based):
-// 7 debit account name, 12 "", 14 "", 16 credit account name, 23 "", 25 summary, 29 "".
-const EPSON_QUOTED = new Set([7, 12, 14, 16, 23, 25, 29]);
+// ---------- Epson (official template: header row + 45 columns) ----------
+// Layout: EPSON's official 仕訳データ取込 template (ヘッダー有), provided
+// 2026-11-18. Mandatory columns (colored in the template): 伝票日付,
+// 借方科目, 借方金額, 貸方科目, 貸方金額. Other columns may stay blank
+// when the app has no corresponding data. See
+// エプソン形式_公式テンプレート_2026-11-18.md.
+export const EPSON_HEADER = [
+  '月種別', '種類', '形式', '作成方法', '付箋', '伝票日付', '伝票番号', '伝票摘要', '枝番',
+  '借方部門', '借方部門名', '借方科目', '借方科目名', '借方補助', '借方補助科目名', '借方金額',
+  '借方消費税コード', '借方消費税業種', '借方消費税税率', '借方資金区分', '借方任意項目１', '借方任意項目２', '借方インボイス情報',
+  '貸方部門', '貸方部門名', '貸方科目', '貸方科目名', '貸方補助', '貸方補助科目名', '貸方金額',
+  '貸方消費税コード', '貸方消費税業種', '貸方消費税税率', '貸方資金区分', '貸方任意項目１', '貸方任意項目２', '貸方インボイス情報',
+  '摘要', '期日', '証番号', '入力マシン', '入力ユーザ', '入力アプリ', '入力会社', '入力日付',
+];
 
 // EPSON: for 対象外 (00) and 非課税 (20/30) categories the rate column must stay
 // blank - setting a rate there makes the EPSON import fail (official FAQ).
@@ -160,45 +169,49 @@ export function isEpsonNoRateTax(tax) {
   return !!tax && EPSON_NO_RATE_KAZEI.has(tax.epsonKazei || '');
 }
 
-export function epsonRow(e) {
-  const { y, m, d } = ymd(e.date);
-  // Rate text is the master value as-is on BOTH sides: 10% is unified to "10"
-  // (decision 2026-11-12; the proven macro used "10.0" on the credit side only).
-  // The reduced-rate text "K8" is kept as-is.
-  const debitTaxText = isEpsonNoRateTax(e.debitTax) ? '' : (e.debitTax.epsonTax || '');
-  const creditTaxText = isEpsonNoRateTax(e.creditTax) ? '' : (e.creditTax.epsonTax || '');
-  const cols = new Array(30).fill('');
-  cols[0] = y;
-  cols[1] = m;
-  cols[2] = d;
-  cols[3] = String(e.voucherNo);       // 伝票番号
-  cols[4] = String(e.amount);          // 借方金額
-  cols[5] = e.debitAccount.epsonCode || '';
-  cols[6] = e.debitAccount.name;
-  cols[7] = e.debitTax.epsonKazei || ''; // 借方課税区分 (00 = 対象外)
-  cols[8] = debitTaxText;                // 借方税区分 (対象外・非課税は空欄)
-  // cols[9..13] (10-14列目): 空欄 / "" (実績どおり)
-  cols[14] = e.creditAccount.epsonCode || '';
-  cols[15] = e.creditAccount.name;
-  cols[16] = e.creditTax.epsonKazei || ''; // 貸方課税区分 (02 = 課税売上(込))
-  cols[17] = creditTaxText;                // 貸方税区分 (10% は借方と統一して "10", 軽減8% は "K8")
-  // cols[18] (19列目): 空欄
-  cols[19] = '2';                          // 20列目: 実績どおり固定
-  // cols[20] (21列目): 空欄 (仕様確定)
-  // cols[21] (22列目): 空欄
-  // cols[22] (23列目): ""
-  cols[23] = String(e.amount);             // 貸方金額 (5列目と同額)
-  cols[24] = truncateByBytes(e.summary, 48); // 摘要 (48バイトまで)
-  // cols[25..29] (26-30列目): 空欄 / "" (実績どおり)
-  return cols.map((v, i) => {
-    const s = v == null ? '' : String(v);
-    if (EPSON_QUOTED.has(i + 1)) return '"' + s.replace(/"/g, '""') + '"';
-    return csvEscape(s);
-  }).join(',');
+// Invoice info (official FAQ 5018): a half-width space means インボイス
+// 発行事業者 (qualified invoice issuer); a digit is the transitional
+// deduction rate for a non-invoice purchase. 7 and 3 are accepted only
+// by 財務会計 Ver.26.10 and later.
+const EPSON_INVOICE_CHAR = { 80: '8', 70: '7', 50: '5', 30: '3', 0: '0' };
+export function epsonInvoiceChar(e, side) {
+  const rate = sideInvoiceRate(e, side);
+  return rate == null ? ' ' : (EPSON_INVOICE_CHAR[rate] ?? ' ');
+}
+
+export function epsonRow(e, eda) {
+  const cols = new Array(45).fill('');
+  cols[0] = '0';  // 月種別: 通常
+  cols[1] = '0';  // 種類: 通常
+  cols[2] = '3';  // 形式: 振替
+  cols[3] = '0';  // 作成方法: 手入力
+  cols[5] = ymd(e.date).plain;               // 伝票日付 (YYYYMMDD, mandatory)
+  cols[6] = String(e.voucherNo);             // 伝票番号
+  cols[8] = String(eda);                     // 枝番: line number within the voucher (形式=3)
+  cols[11] = e.debitAccount.epsonCode || ''; // 借方科目 (mandatory)
+  cols[12] = e.debitAccount.name;            // 借方科目名
+  cols[15] = String(e.amount);               // 借方金額 (mandatory)
+  cols[16] = e.debitTax.epsonKazei || '';    // 借方消費税コード (応援用コード)
+  cols[18] = isEpsonNoRateTax(e.debitTax) ? '' : (e.debitTax.epsonTax || ''); // 借方消費税税率 (テキスト欄)
+  cols[22] = epsonInvoiceChar(e, 'debit');   // 借方インボイス情報
+  cols[25] = e.creditAccount.epsonCode || ''; // 貸方科目 (mandatory)
+  cols[26] = e.creditAccount.name;            // 貸方科目名
+  cols[29] = String(e.amount);                // 貸方金額 (mandatory)
+  cols[30] = e.creditTax.epsonKazei || '';    // 貸方消費税コード
+  cols[32] = isEpsonNoRateTax(e.creditTax) ? '' : (e.creditTax.epsonTax || ''); // 貸方消費税税率
+  cols[36] = epsonInvoiceChar(e, 'credit');   // 貸方インボイス情報
+  cols[37] = truncateByBytes(e.summary, 48);  // 摘要 (48 bytes, carried over from the proven layout)
+  return cols;
 }
 
 export function toEpsonCSV(entries) {
-  return entries.map(epsonRow).join('\r\n') + (entries.length ? '\r\n' : '');
+  const counters = {};
+  const lines = [EPSON_HEADER.map(csvEscape).join(',')];
+  for (const e of entries) {
+    const n = (counters[e.voucherNo] = (counters[e.voucherNo] || 0) + 1);
+    lines.push(epsonRow(e, n).map(csvEscape).join(','));
+  }
+  return lines.join('\r\n') + '\r\n';
 }
 
 // ---------- freee (template: [表題行] header + [明細行] rows) ----------
@@ -832,11 +845,14 @@ export function verifyGenerated(format, text, entries) {
   };
 
   if (format === 'epson') {
-    expectRows(entries.length, 'エプソン');
-    checkCols(rows, 30, 'エプソン');
-    rows.forEach((r, i) => {
-      if (num(r[4]) !== num(r[23])) fail(`エプソン: ${i + 1}行目の借方金額と貸方金額が一致しません`);
-      if (entries[i] && num(r[4]) !== Number(entries[i].amount)) fail(`エプソン: ${i + 1}行目の金額が仕訳と一致しません`);
+    expectRows(entries.length + 1, 'エプソン');
+    sameHeader(rows[0], EPSON_HEADER, 'エプソン');
+    const data = rows.slice(1);
+    checkCols(data, 45, 'エプソン');
+    data.forEach((r, i) => {
+      if (!/^\d{8}$/.test(r[5])) fail(`エプソン: ${i + 1}行目の伝票日付がYYYYMMDD形式ではありません`);
+      if (num(r[15]) !== num(r[29])) fail(`エプソン: ${i + 1}行目の借方金額と貸方金額が一致しません`);
+      if (entries[i] && num(r[15]) !== Number(entries[i].amount)) fail(`エプソン: ${i + 1}行目の金額が仕訳と一致しません`);
     });
   } else if (format === 'jdl') {
     expectRows(entries.length + 1, 'JDL');

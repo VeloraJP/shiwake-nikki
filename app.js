@@ -7,8 +7,8 @@ import {
   buildTransferData, shorokuBalance, shorokuSuggestion,
   tokenizeSearch, matchesSearch, journalFlags, verifyGenerated, trialBalance,
   invoiceDeductionRate,
-} from './exporters.js?v=25';
-import { encodeSJIS } from './sjis.js?v=25';
+} from './exporters.js?v=26';
+import { encodeSJIS } from './sjis.js?v=26';
 
 const STORAGE_KEY = 'journalToolStateV1';
 const FORMAT_LABELS = { transfer: '転送', freee: 'freee', epson: 'エプソン', jdl: 'JDL', yayoi: '弥生', mf: 'MF', pca: 'PCA', obc: '勘定奉行' };
@@ -1023,9 +1023,6 @@ function download(filename, blob) {
 function collectWarnings(format, entries) {
   const warnings = [];
   if (format === 'epson') {
-    if (entries.some((e) => e.nonInvoice && e.invoiceRate != null)) {
-      warnings.push('エプソン: 「インボイスなし」の情報はエプソン形式（30列）に載せる欄がないため、ファイルには反映されません。取り込み側で、科目のインボイス区分と伝票日付から自動判定されます');
-    }
     for (const e of entries) {
       for (const side of ['debit', 'credit']) {
         const acc = e[side + 'Account'], tax = e[side + 'Tax'];

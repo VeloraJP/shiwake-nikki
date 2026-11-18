@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="light">
 <title>汎用仕訳日記帳</title>
-<link rel="stylesheet" href="style.css?v=25">
+<link rel="stylesheet" href="style.css?v=26">
 </head>
 <body>
 <header>
-  <h1>仕訳日記帳 <span class="version">v25</span></h1>
+  <h1>仕訳日記帳 <span class="version">v26</span></h1>
   <div class="company-switch">
     <label for="company-select">会社</label>
     <select id="company-select"></select>
@@ -254,7 +254,7 @@
         <thead><tr><th>形式</th><th>根拠</th><th>実機検証</th><th>主な未確認点</th></tr></thead>
         <tbody>
           <tr><td>freee</td><td>公開テンプレートの並び（[表題行]／[明細行]）</td><td>未実施</td><td>テンプレート実物との列順の完全照合／経過措置の税区分は「買い手側対応機能」が有効な事業所のみ存在</td></tr>
-          <tr><td>エプソン財務会計</td><td>実績のある30列の並び</td><td>未実施</td><td>課税仕入パターンとK8表記の取り込み可否／インボイス情報はこの形式に載らない（取り込み側で自動判定）</td></tr>
+          <tr><td>エプソン財務会計</td><td>EPSON公式テンプレート（ヘッダー有45列）の並び</td><td>未実施</td><td>70%・30%のインボイス値は財務会計 Ver.26.10以降で取込可能／摘要の48バイト切り捨ては旧形式の実績踏襲</td></tr>
           <tr><td>JDL</td><td>実績のある16列の並び</td><td>未実施</td><td>日付表記と番号の開始値／経過措置の税区は80%・70%のみ存在（50%・30%・控除なし用はない）</td></tr>
           <tr><td>弥生会計</td><td>公開資料「仕訳データの項目と記述形式」の並び</td><td>未実施</td><td>文字コードの公式明記がないためShift_JISで出力／経過措置の「区分○○%」付加は公式の内税形式の例からの読み替え</td></tr>
           <tr><td>マネーフォワード</td><td>公開資料「『仕訳帳』をインポートする」の並び</td><td>未実施</td><td>文字コードの公式明記がないためShift_JISで出力／インボイス列の「％」は全角・半角のどちらが完全一致か未確認</td></tr>
@@ -352,6 +352,6 @@
 
 <footer class="muted">データはこの端末の中（localStorage）にだけ保存されます。サーバーには送信されません。</footer>
 
-<script type="module" src="app.js?v=25"></script>
+<script type="module" src="app.js?v=26"></script>
 </body>
 </html>

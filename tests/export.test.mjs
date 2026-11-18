@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import {
   resolveEntry, parseCsvLine,
-  toEpsonCSV, toFreeeCSV, FREEE_COLUMNS, isEpsonNoRateTax,
+  toEpsonCSV, EPSON_HEADER, toFreeeCSV, FREEE_COLUMNS, isEpsonNoRateTax,
   toJdlCSV, JDL_HEADER, collectJdlWarnings, pickJdlTax,
   toYayoiCSV, yayoiTaxRate, yayoiTaxAmount, collectYayoiWarnings,
   toMfCSV, MF_COLUMNS, collectMfWarnings, sanitizeMfText,
@@ -40,49 +40,59 @@ const accountsById = Object.fromEntries(Object.values(accounts).map((a) => [a.id
 const taxesById = Object.fromEntries(Object.values(taxes).map((t) => [t.id, t]));
 const resolve = (j) => resolveEntry(j, accountsById, taxesById);
 
-// Epson proven-sample journals (see エプソン形式_実績30列.md)
+// Epson sample journals (dates/accounts mirror the old proven macro samples)
 const epsonJ1 = resolve({ id: 'j1', date: '2026-04-01', voucherNo: 1, debitAccountId: 'cash', debitTaxId: 'excluded', creditAccountId: 'sales', creditTaxId: 'sales10', amount: 70000, summary: '本日売上高' });
 const epsonJ2 = resolve({ id: 'j2', date: '2026-04-01', voucherNo: 2, debitAccountId: 'receivable', debitTaxId: 'excluded', creditAccountId: 'sales', creditTaxId: 'sales10', amount: 80000, summary: '本日売上高/ｽｸｴｱ' });
+const epsonDataCols = (entries) => toEpsonCSV(entries).trimEnd().split('\r\n').slice(1).map(parseCsvLine);
 
-// ---------- a. Epson ----------
-test('epson: proven sample rows match except column 21 (blank by spec) and column 18 (rate text unified to "10" by 2026-11-12 decision; proven macro used "10.0")', () => {
-  const expected1 = '2026,04,01,1,70000,1111,"現金",00,,,,"",,"",4111,"売上高",02,10.0,,2,"来てほしい売上(店舗）",,"",70000,"本日売上高",,,,"",';
-  const expected2 = '2026,04,01,2,80000,1122,"売掛金",00,,,,"",,"",4111,"売上高",02,10.0,,2,"来てほしい売上(店舗）",,"",80000,"本日売上高/ｽｸｴｱ",,,,"",';
+// ---------- a. Epson (official template, header + 45 columns) ----------
+test('epson: header row matches the official template and data rows carry the mapped values', () => {
   const lines = toEpsonCSV([epsonJ1, epsonJ2]).trimEnd().split('\r\n');
-  assert.strictEqual(lines.length, 2);
-  [[lines[0], expected1], [lines[1], expected2]].forEach(([actual, expected]) => {
-    const a = parseCsvLine(actual);
-    const e = parseCsvLine(expected);
-    assert.strictEqual(a.length, 30, 'column count must be 30');
-    assert.strictEqual(e.length, 30);
-    for (let i = 0; i < 30; i++) {
-      if (i === 20) {
-        // Column 21: proven file carries a shop name; this tool outputs blank (spec).
-        assert.strictEqual(a[i], '', 'column 21 must be blank');
-        assert.notStrictEqual(e[i], '');
-        continue;
-      }
-      if (i === 17) {
-        // Column 18: proven macro wrote "10.0" on the credit side; by the
-        // 2026-11-12 decision the 10% rate text is unified to "10" on both sides.
-        assert.strictEqual(e[i], '10.0', 'proven record keeps "10.0"');
-        assert.strictEqual(a[i], '10', 'column 18 must be unified to "10"');
-        continue;
-      }
-      assert.strictEqual(a[i], e[i], `column ${i + 1} mismatch`);
-    }
-  });
+  assert.strictEqual(lines.length, 3, 'header + 2 data rows');
+  assert.deepStrictEqual(parseCsvLine(lines[0]), EPSON_HEADER);
+  const c1 = parseCsvLine(lines[1]);
+  assert.strictEqual(c1.length, 45, 'column count must be 45');
+  assert.strictEqual(c1[0], '0'); // 月種別: 通常
+  assert.strictEqual(c1[2], '3'); // 形式: 振替
+  assert.strictEqual(c1[5], '20260401'); // 伝票日付 YYYYMMDD
+  assert.strictEqual(c1[6], '1'); // 伝票番号
+  assert.strictEqual(c1[8], '1'); // 枝番
+  assert.strictEqual(c1[11], '1111'); // 借方科目
+  assert.strictEqual(c1[12], '現金'); // 借方科目名
+  assert.strictEqual(c1[15], '70000'); // 借方金額
+  assert.strictEqual(c1[16], '00'); // 借方消費税コード (対象外)
+  assert.strictEqual(c1[18], ''); // 対象外は税率空欄
+  assert.strictEqual(c1[22], ' '); // 借方インボイス情報: 適格 = 半角スペース
+  assert.strictEqual(c1[25], '4111'); // 貸方科目
+  assert.strictEqual(c1[29], '70000'); // 貸方金額
+  assert.strictEqual(c1[30], '02'); // 貸方消費税コード (課税売上(込))
+  assert.strictEqual(c1[32], '10'); // 貸方消費税税率
+  assert.strictEqual(c1[36], ' '); // 貸方インボイス情報
+  assert.strictEqual(c1[37], '本日売上高'); // 摘要
+  const c2 = parseCsvLine(lines[2]);
+  assert.strictEqual(c2[6], '2');
+  assert.strictEqual(c2[11], '1122');
+  assert.strictEqual(c2[37], '本日売上高/ｽｸｴｱ');
 });
 
-test('epson: debit tax columns (8/9) and K8 on credit', () => {
+test('epson: 枝番 counts lines within the same voucher number', () => {
+  const a = resolve({ id: 'e1', date: '2026-04-01', voucherNo: 9, debitAccountId: 'supplies', debitTaxId: 'purchase10', creditAccountId: 'shoroku', creditTaxId: 'excluded', amount: 100, summary: '一行目' });
+  const b = resolve({ id: 'e2', date: '2026-04-01', voucherNo: 9, debitAccountId: 'shoroku', debitTaxId: 'excluded', creditAccountId: 'cash', creditTaxId: 'excluded', amount: 100, summary: '二行目' });
+  const rows = epsonDataCols([a, b]);
+  assert.strictEqual(rows[0][8], '1');
+  assert.strictEqual(rows[1][8], '2');
+});
+
+test('epson: debit tax code/rate columns (17/19) and K8 on credit', () => {
   const j = resolve({ id: 'j3', date: '2026-04-02', voucherNo: 3, debitAccountId: 'supplies', debitTaxId: 'purchase10', creditAccountId: 'cash', creditTaxId: 'excluded', amount: 1100, summary: 'コピー用紙' });
-  const cols = parseCsvLine(toEpsonCSV([j]).trimEnd());
-  assert.strictEqual(cols[7], ''); // 課税仕入 epson code unconfirmed -> blank (warning is a UI concern)
-  assert.strictEqual(cols[16], '00'); // credit 現金 = 対象外
-  assert.strictEqual(cols[17], '');
+  const cols = epsonDataCols([j])[0];
+  assert.strictEqual(cols[16], ''); // 課税仕入 epson code unconfirmed -> blank (warning is a UI concern)
+  assert.strictEqual(cols[30], '00'); // credit 現金 = 対象外
+  assert.strictEqual(cols[32], '');
   const j8 = resolve({ id: 'j4', date: '2026-04-02', voucherNo: 4, debitAccountId: 'cash', debitTaxId: 'excluded', creditAccountId: 'sales', creditTaxId: 'sales8', amount: 1080, summary: '軽減売上' });
-  const cols8 = parseCsvLine(toEpsonCSV([j8]).trimEnd());
-  assert.strictEqual(cols8[17], 'K8');
+  const cols8 = epsonDataCols([j8])[0];
+  assert.strictEqual(cols8[30], '02');
+  assert.strictEqual(cols8[32], 'K8');
 });
 
 // ---------- b. freee (thick) ----------
@@ -215,23 +225,23 @@ test('sjis: known kanji encode to CP932 bytes, unmapped becomes ?', () => {
 // ---------- f. Reversed entries (貸借逆仕訳: 売上高が借方・現金が貸方) ----------
 const reversed = resolve({ id: 'r1', date: '2026-04-05', voucherNo: 10, debitAccountId: 'sales', debitTaxId: 'sales10', creditAccountId: 'cash', creditTaxId: 'excluded', amount: 5000, summary: '売上取消' });
 
-test('reversed: epson puts debit-side tax in columns 8/9 and credit-side tax in 17/18', () => {
-  const cols = parseCsvLine(toEpsonCSV([reversed]).trimEnd());
-  assert.strictEqual(cols[5], '4111', 'debit account code = 売上高');
-  assert.strictEqual(cols[7], '02', 'column 8 = debit 課税区分 (課税売上)');
-  assert.strictEqual(cols[8], '10', 'column 9 = debit 税区分 (raw master value, not "10.0")');
-  assert.strictEqual(cols[14], '1111', 'credit account code = 現金');
-  assert.strictEqual(cols[16], '00', 'column 17 = credit 課税区分 (対象外)');
-  assert.strictEqual(cols[17], '', 'column 18 = credit 税区分 (対象外は空欄)');
-  assert.strictEqual(cols[4], '5000');
-  assert.strictEqual(cols[23], '5000');
+test('reversed: epson puts debit-side tax in columns 17/19 and credit-side tax in 31/33', () => {
+  const cols = epsonDataCols([reversed])[0];
+  assert.strictEqual(cols[11], '4111', 'debit account code = 売上高');
+  assert.strictEqual(cols[16], '02', 'column 17 = debit 消費税コード (課税売上)');
+  assert.strictEqual(cols[18], '10', 'column 19 = debit 消費税税率');
+  assert.strictEqual(cols[25], '1111', 'credit account code = 現金');
+  assert.strictEqual(cols[30], '00', 'column 31 = credit 消費税コード (対象外)');
+  assert.strictEqual(cols[32], '', 'column 33 = credit 消費税税率 (対象外は空欄)');
+  assert.strictEqual(cols[15], '5000');
+  assert.strictEqual(cols[29], '5000');
 });
 
-test('reversed: epson debit-side K8 stays "K8" in column 9', () => {
+test('reversed: epson debit-side K8 stays "K8" in column 19', () => {
   const j = resolve({ id: 'r2', date: '2026-04-05', voucherNo: 11, debitAccountId: 'sales', debitTaxId: 'sales8', creditAccountId: 'cash', creditTaxId: 'excluded', amount: 1080, summary: '軽減売上取消' });
-  const cols = parseCsvLine(toEpsonCSV([j]).trimEnd());
-  assert.strictEqual(cols[7], '02');
-  assert.strictEqual(cols[8], 'K8');
+  const cols = epsonDataCols([j])[0];
+  assert.strictEqual(cols[16], '02');
+  assert.strictEqual(cols[18], 'K8');
 });
 
 test('reversed: freee swaps account/tax positions with the entry', () => {
@@ -270,13 +280,13 @@ const resolveNC = (j) => resolveEntry(j,
   Object.fromEntries(Object.values(blankTaxes).map((t) => [t.id, t])));
 const noCode = resolveNC({ id: 'n1', date: '2026-04-06', voucherNo: 12, debitAccountId: 'kari', debitTaxId: 'excludedBlank', creditAccountId: 'cash2', creditTaxId: 'excludedBlank', amount: 3000, summary: '仮払い' });
 
-test('no codes: epson leaves account code columns (6/15) blank, names still output', () => {
-  const cols = parseCsvLine(toEpsonCSV([noCode]).trimEnd());
-  assert.strictEqual(cols[5], '');
-  assert.strictEqual(cols[6], '仮払金');
-  assert.strictEqual(cols[14], '');
-  assert.strictEqual(cols[15], '現金');
-  assert.strictEqual(cols[7], '00', 'tax 課税区分 is independent of account codes');
+test('no codes: epson leaves account code columns (12/26) blank, names still output', () => {
+  const cols = epsonDataCols([noCode])[0];
+  assert.strictEqual(cols[11], '');
+  assert.strictEqual(cols[12], '仮払金');
+  assert.strictEqual(cols[25], '');
+  assert.strictEqual(cols[26], '現金');
+  assert.strictEqual(cols[16], '00', 'tax 消費税コード is independent of account codes');
 });
 
 test('no codes: jdl leaves code columns (4/8) blank and 課区/税区 blank when tax mappings are blank', () => {
@@ -311,11 +321,11 @@ test('custom codes: exporter uses the master values as-is (custom overrides defa
   const j = resolveEntry({ id: 'c1', date: '2026-04-07', voucherNo: 15, debitAccountId: 'cashX', debitTaxId: 'exX', creditAccountId: 'salesX', creditTaxId: 's10X', amount: 1000, summary: '独自コード' },
     Object.fromEntries(Object.values(customAccounts).map((a) => [a.id, a])),
     Object.fromEntries(Object.values(customTaxes).map((t) => [t.id, t])));
-  const ec = parseCsvLine(toEpsonCSV([j]).trimEnd());
-  assert.strictEqual(ec[5], '9999', 'epson debit code = custom value, not default 1111');
-  assert.strictEqual(ec[14], '4000', 'epson credit code = custom value, not default 4111');
-  assert.strictEqual(ec[16], '99', 'epson credit 課税区分 = custom value');
-  assert.strictEqual(ec[17], '10', 'epson credit 税区分 = master value as-is (unified "10", no "10.0" conversion)');
+  const ec = epsonDataCols([j])[0];
+  assert.strictEqual(ec[11], '9999', 'epson debit code = custom value, not default 1111');
+  assert.strictEqual(ec[25], '4000', 'epson credit code = custom value, not default 4111');
+  assert.strictEqual(ec[30], '99', 'epson credit 消費税コード = custom value');
+  assert.strictEqual(ec[32], '10', 'epson credit 消費税税率 = master value as-is (unified "10", no "10.0" conversion)');
   const jr = parseCsvLine(toJdlCSV([j]).trimEnd().split('\r\n')[1]);
   assert.strictEqual(jr[3], '999');
   assert.strictEqual(jr[7], '400');
@@ -327,11 +337,11 @@ test('custom codes: exporter uses the master values as-is (custom overrides defa
 const bothTaxed = resolve({ id: 'bt1', date: '2026-04-08', voucherNo: 20, debitAccountId: 'supplies', debitTaxId: 'purchase10', creditAccountId: 'sales', creditTaxId: 'sales10', amount: 3300, summary: '両側課税' });
 
 test('both taxed: epson outputs each side tax in its own columns independently', () => {
-  const cols = parseCsvLine(toEpsonCSV([bothTaxed]).trimEnd());
-  assert.strictEqual(cols[7], '', 'debit 課税区分: 課税仕入 is unconfirmed -> blank');
-  assert.strictEqual(cols[8], '');
-  assert.strictEqual(cols[16], '02', 'credit 課税区分 = 課税売上');
-  assert.strictEqual(cols[17], '10', 'credit 税区分 = 10 (unified with debit side)');
+  const cols = epsonDataCols([bothTaxed])[0];
+  assert.strictEqual(cols[16], '', 'debit 消費税コード: 課税仕入 is unconfirmed -> blank');
+  assert.strictEqual(cols[18], '');
+  assert.strictEqual(cols[30], '02', 'credit 消費税コード = 課税売上');
+  assert.strictEqual(cols[32], '10', 'credit 消費税税率 = 10 (unified with debit side)');
 });
 
 test('both taxed: freee outputs both sides tax names', () => {
@@ -360,9 +370,9 @@ const rawEntry = (over) => ({
 });
 
 test('epson: purchase tax code 32 outputs debit rate as-is (10)', () => {
-  const cols = parseCsvLine(toEpsonCSV([rawEntry({})]).trimEnd());
-  assert.strictEqual(cols[7], '32', 'debit 課税区分 = 32 （課税仕入（込）)');
-  assert.strictEqual(cols[8], '10', 'debit 税区分 = 10 (debit side keeps the master text)');
+  const cols = epsonDataCols([rawEntry({})])[0];
+  assert.strictEqual(cols[16], '32', 'debit 消費税コード = 32 （課税仕入（込）)');
+  assert.strictEqual(cols[18], '10', 'debit 消費税税率 = 10 (debit side keeps the master text)');
 });
 
 test('epson: purchase tax on the credit side also outputs 10 as-is (unified 2026-11-12), K8 stays K8', () => {
@@ -370,14 +380,14 @@ test('epson: purchase tax on the credit side also outputs 10 as-is (unified 2026
     debitTax: { name: '対象外', epsonKazei: '00', epsonTax: '' },
     creditTax: { name: '課税仕入10%（込）', epsonKazei: '32', epsonTax: '10' },
   });
-  const cols = parseCsvLine(toEpsonCSV([e]).trimEnd());
-  assert.strictEqual(cols[16], '32');
-  assert.strictEqual(cols[17], '10');
+  const cols = epsonDataCols([e])[0];
+  assert.strictEqual(cols[30], '32');
+  assert.strictEqual(cols[32], '10');
   const e8 = rawEntry({
     debitTax: { name: '対象外', epsonKazei: '00', epsonTax: '' },
     creditTax: { name: '課税仕入8%軽減（込）', epsonKazei: '32', epsonTax: 'K8' },
   });
-  assert.strictEqual(parseCsvLine(toEpsonCSV([e8]).trimEnd())[17], 'K8');
+  assert.strictEqual(epsonDataCols([e8])[0][32], 'K8');
 });
 
 test('epson: rate is forced blank for 対象外/非課税 categories even if a rate is set', () => {
@@ -385,11 +395,11 @@ test('epson: rate is forced blank for 対象外/非課税 categories even if a r
     debitTax: { name: '非課税売上', epsonKazei: '20', epsonTax: '10' },
     creditTax: { name: '非課税仕入', epsonKazei: '30', epsonTax: '10' },
   });
-  const cols = parseCsvLine(toEpsonCSV([e]).trimEnd());
-  assert.strictEqual(cols[7], '20');
-  assert.strictEqual(cols[8], '', 'debit rate blanked for 非課税');
-  assert.strictEqual(cols[16], '30');
-  assert.strictEqual(cols[17], '', 'credit rate blanked for 非課税');
+  const cols = epsonDataCols([e])[0];
+  assert.strictEqual(cols[16], '20');
+  assert.strictEqual(cols[18], '', 'debit rate blanked for 非課税');
+  assert.strictEqual(cols[30], '30');
+  assert.strictEqual(cols[32], '', 'credit rate blanked for 非課税');
   assert.ok(isEpsonNoRateTax({ epsonKazei: '00' }) && isEpsonNoRateTax({ epsonKazei: '20' }) && isEpsonNoRateTax({ epsonKazei: '30' }));
   assert.ok(!isEpsonNoRateTax({ epsonKazei: '02' }) && !isEpsonNoRateTax({ epsonKazei: '32' }));
 });
@@ -900,6 +910,8 @@ const invTaxes = {
   'tax-purchase10': { id: 'tax-purchase10', name: '課税仕入10%（込）', freeeName: '課対仕入10%', epsonKazei: '32', epsonTax: '10', jdlKaku: '31', jdlTax: '3', yayoiName: '課対仕入込10%', mfName: '課税仕入 10%', pcaCode: 'Q5', pcaName: '仕入10%', obcCode: '0010' },
   'tax-purchase10-k80': { id: 'tax-purchase10-k80', name: '課税仕入10%（込）・経過措置80%', freeeName: '課対仕入（控80）10%', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '課対仕入込10%区分80%', mfName: '課税仕入 10%', pcaCode: '', pcaName: '仕入10%控80', obcCode: '', transitional: true, baseTaxId: 'tax-purchase10', invoiceRate: 80 },
   'tax-purchase10-k70': { id: 'tax-purchase10-k70', name: '課税仕入10%（込）・経過措置70%', freeeName: '課対仕入（控70）10%', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '73', yayoiName: '課対仕入込10%区分70%', mfName: '課税仕入 10%', pcaCode: 'QI', pcaName: '仕入10%控70', obcCode: '', transitional: true, baseTaxId: 'tax-purchase10', invoiceRate: 70 },
+  'tax-purchase10-k50': { id: 'tax-purchase10-k50', name: '課税仕入10%（込）・経過措置50%', freeeName: '課対仕入（控50）10%', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '課対仕入込10%区分50%', mfName: '課税仕入 10%', pcaCode: '', pcaName: '', obcCode: '', transitional: true, baseTaxId: 'tax-purchase10', invoiceRate: 50 },
+  'tax-purchase10-k30': { id: 'tax-purchase10-k30', name: '課税仕入10%（込）・経過措置30%', freeeName: '課対仕入（控30）10%', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '課対仕入込10%区分30%', mfName: '課税仕入 10%', pcaCode: '', pcaName: '', obcCode: '', transitional: true, baseTaxId: 'tax-purchase10', invoiceRate: 30 },
   'tax-purchase10-k0': { id: 'tax-purchase10-k0', name: '課税仕入10%（込）・非適格（控除なし）', freeeName: '対象外', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '課対仕入込10%区分控不', mfName: '課税仕入 10%', pcaCode: 'Q0', pcaName: '仕入免税等', obcCode: '', transitional: true, baseTaxId: 'tax-purchase10', invoiceRate: 0 },
 };
 const invResolve = (j) => resolveEntry(j, accountsById, invTaxes);
@@ -991,9 +1003,28 @@ test('invoice: JDL swaps only the 税区 when registered, and falls back with a 
   assert.ok(collectJdlWarnings([buy80]).some((w) => w.includes('経過措置80%')), 'the fallback is reported');
 });
 
-test('invoice: epson output is identical with and without the flag (the format cannot carry it)', () => {
+test('invoice: epson writes the deduction code into the invoice columns (23/37), space when qualified', () => {
+  const row = (j) => epsonDataCols([j])[0];
+  // 70% period: the debit purchase side gets '7'; the 対象外 credit side stays a space.
+  assert.strictEqual(row(buy70)[22], '7');
+  assert.strictEqual(row(buy70)[36], ' ');
+  // The tax code/rate still come from the base division (inherited on swap).
+  assert.strictEqual(row(buy70)[16], '32');
+  assert.strictEqual(row(buy70)[18], '10');
+  // Each statutory period maps to its code.
+  assert.strictEqual(row(invResolve({ ...buyBase, date: '2025-04-01', nonInvoice: true }))[22], '8');
+  assert.strictEqual(row(invResolve({ ...buyBase, date: '2029-01-15', nonInvoice: true }))[22], '5');
+  assert.strictEqual(row(invResolve({ ...buyBase, date: '2030-12-01', nonInvoice: true }))[22], '3');
+  assert.strictEqual(row(invResolve({ ...buyBase, date: '2031-10-05', nonInvoice: true }))[22], '0');
+  // No flag: both sides are the qualified-issuer space.
   const plain = invResolve({ ...buyBase, date: '2027-05-10' });
-  assert.strictEqual(toEpsonCSV([buy70]), toEpsonCSV([plain]));
+  assert.strictEqual(row(plain)[22], ' ');
+  assert.strictEqual(row(plain)[36], ' ');
+  // Before the measure started, the flag has no effect.
+  assert.strictEqual(row(invResolve({ ...buyBase, date: '2023-09-15', nonInvoice: true }))[22], ' ');
+  // Flagged and plain rows differ only in the invoice column.
+  const a = row(buy70), b = row(plain);
+  a.forEach((v, i) => { if (i !== 22) assert.strictEqual(v, b[i], `column ${i + 1} must not change`); });
 });
 
 test('invoice: generated files still pass the reload verification', () => {

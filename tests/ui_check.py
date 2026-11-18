@@ -306,17 +306,20 @@ with sync_playwright() as p:
     # Epson (all CSV downloads are Shift_JIS by design: encodeSJIS for every format)
     path, dlg = run_export("epson")
     rows = read_rows(path, "cp932")
-    by_summary = {r[24]: r for r in rows if len(r) > 24}
+    check("E0 epson: first row is the official template header (45 columns)",
+          len(rows) > 1 and len(rows[0]) == 45 and rows[0][5] == "伝票日付" and rows[0][22] == "借方インボイス情報" and rows[0][36] == "貸方インボイス情報",
+          str(rows[0]) if rows else "no rows")
+    by_summary = {r[37]: r for r in rows if len(r) > 37}
     r5 = by_summary.get("税区分不一致")
-    check("E1 epson: mismatch entry debit tax cols are sales-tax 02/10", r5 and r5[7] == "02" and r5[8] == "10", str(r5))
-    check("E2 epson: mismatch entry credit tax col is 00, debit code is the registered 523", r5 and r5[16] == "00" and r5[5] == "523", str(r5))
+    check("E1 epson: mismatch entry debit tax cols are sales-tax 02/10", r5 and r5[16] == "02" and r5[18] == "10", str(r5))
+    check("E2 epson: mismatch entry credit tax col is 00, debit code is the registered 523", r5 and r5[30] == "00" and r5[11] == "523", str(r5))
     r6 = by_summary.get("両側課税")
-    check("E3 epson: both-taxed credit side 02/10, debit side 32/10 (rate text unified to 10)", r6 and r6[16] == "02" and r6[17] == "10" and r6[7] == "32" and r6[8] == "10" and r6[14] == "810", str(r6))
-    r9 = [r for r in rows if len(r) > 24 and r[24].startswith("あ")]
-    check("E4 epson: summary truncated to 48 bytes (24 fullwidth chars)", len(r9) == 1 and r9[0][24] == "あ" * 24, str(r9))
+    check("E3 epson: both-taxed credit side 02/10, debit side 32/10 (rate text unified to 10)", r6 and r6[30] == "02" and r6[32] == "10" and r6[16] == "32" and r6[18] == "10" and r6[25] == "810", str(r6))
+    r9 = [r for r in rows if len(r) > 37 and r[37].startswith("あ")]
+    check("E4 epson: summary truncated to 48 bytes (24 fullwidth chars)", len(r9) == 1 and r9[0][37] == "あ" * 24, str(r9))
     check("E5 epson: warnings shown for unset codes", "未設定" in dlg, dlg[:160])
     r11 = by_summary.get("コード未設定")
-    check("E5b epson: codeless account outputs a blank code column", r11 and r11[5] == "" and r11[6] == "地代家賃", str(r11))
+    check("E5b epson: codeless account outputs a blank code column", r11 and r11[11] == "" and r11[12] == "地代家賃", str(r11))
 
     # JDL
     path, dlg = run_export("jdl")
@@ -559,7 +562,7 @@ with sync_playwright() as p:
     ctx2.close()
 
     # --- P. v16: search tokens, review flags, marker, verification note ---
-    check("P0 version label shows v25", "v25" in pg.locator("header").inner_text())
+    check("P0 version label shows v26", "v26" in pg.locator("header").inner_text())
 
     pg.click("button[data-tab='entry']")
     pg.wait_for_timeout(200)
