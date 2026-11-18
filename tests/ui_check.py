@@ -113,6 +113,11 @@ with sync_playwright() as p:
           and get_master_value("#tax-table", "非課税仕入", "obcCode") == ""
           and get_master_value("#account-table", "現金", "obcCode") == "")
 
+    check("masters: transitional tax rows are listed for code registration (v25)",
+          get_master_value("#tax-table", "課税仕入10%（込）・経過措置70%", "freeeName") == "課対仕入（控70）10%"
+          and get_master_value("#tax-table", "課税仕入8%軽減（込）・非適格（控除なし）", "pcaName") == "仕入免税等"
+          and get_master_value("#tax-table", "課税仕入10%（込）・経過措置70%", "jdlTax") == "")
+
     pg.click("button[data-tab='entry']")
     pg.wait_for_timeout(200)
 
@@ -233,6 +238,31 @@ with sync_playwright() as p:
     set_entry(debit="地代家賃", credit="現金", amount="500", date="2026-04-11", summary="コード未設定")
     pg.click("#save-new"); pg.wait_for_timeout(150)
     check("S11 codeless-account entry saves", count_journals() == 9, msg())
+
+    # S12 invoice transitional measure (v25): the checkbox appears only
+    # for purchase tax categories; a checked entry dated in the 70%
+    # window (2026-10-01..2028-09-30) gets the 非インボイス 70% badge.
+    set_entry(debit="消耗品費", credit="現金", dtax="tax-purchase10", ctax="tax-excluded",
+              amount="11000", date="2026-10-05", summary="インボイスなし仕入")
+    check("S12a invoice checkbox row appears for a purchase tax category",
+          pg.locator("#e-invoice-row").is_visible())
+    check("S12b note shows the 70% rate for an Oct-2026 date",
+          "70%控除" in pg.locator("#e-invoice-note").inner_text(), pg.locator("#e-invoice-note").inner_text())
+    n_opts = pg.evaluate("document.querySelectorAll('#e-debit-tax option').length")
+    check("S12c entry tax selector offers only the 7 base categories", n_opts == 7, str(n_opts))
+    pg.check("#e-noninvoice")
+    pg.click("#save-new"); pg.wait_for_timeout(200)
+    check("S12d non-invoice entry saves", count_journals() == 10, msg())
+    pg.click("button[data-tab='list']"); pg.wait_for_timeout(200)
+    inv_row = pg.locator("#journal-table tbody tr", has_text="インボイスなし仕入")
+    check("S12e list shows the 非インボイス 70% badge", "非インボイス 70%" in inv_row.inner_text(), inv_row.inner_text()[:140])
+    inv_row.locator("[data-act='edit']").click(); pg.wait_for_timeout(200)
+    check("S12f edit restores the checked state", pg.locator("#e-noninvoice").is_checked())
+    pg.click("#edit-cancel"); pg.wait_for_timeout(150)
+    set_entry(debit="現金", credit="売上高", dtax="tax-excluded", ctax="tax-sales10",
+              amount="100", date="2026-10-05", summary="売上のみ")
+    check("S12g invoice row hidden when no purchase tax is involved",
+          not pg.locator("#e-invoice-row").is_visible())
 
     # ---------- Exports: download and inspect CSV ----------
     pg.click("button[data-tab='export']")
@@ -517,8 +547,8 @@ with sync_playwright() as p:
     pg2.wait_for_timeout(200)
     acc_rows = pg2.locator("#account-table tbody tr").count()
     tax_rows = pg2.locator("#tax-table tbody tr").count()
-    check("N4 legacy company gains current defaults (72+1 accounts, 7 taxes)",
-          acc_rows == 73 and tax_rows == 7, f"acc={acc_rows} tax={tax_rows}")
+    check("N4 legacy company gains current defaults (72+1 accounts, 7+10 taxes)",
+          acc_rows == 73 and tax_rows == 17, f"acc={acc_rows} tax={tax_rows}")
     check("N4b legacy differences survive （現金 jdlCode=999, 独自科目X)",
           master_code(pg2, "現金", "jdlCode") == "999" and master_code(pg2, "独自科目X", "name") is not None)
     stored = pg2.evaluate("() => JSON.parse(localStorage.getItem('journalToolStateV1'))")
@@ -529,7 +559,7 @@ with sync_playwright() as p:
     ctx2.close()
 
     # --- P. v16: search tokens, review flags, marker, verification note ---
-    check("P0 version label shows v22", "v22" in pg.locator("header").inner_text())
+    check("P0 version label shows v25", "v25" in pg.locator("header").inner_text())
 
     pg.click("button[data-tab='entry']")
     pg.wait_for_timeout(200)
@@ -626,23 +656,23 @@ with sync_playwright() as p:
         out = {}
         rows = pg.locator("#tb-body-bs tr, #tb-body-pl tr")
         for i in range(rows.count()):
-            if rows.nth(i).locator("td").count() < 7:
+            if rows.nth(i).locator("td").count() < 5:
                 continue  # category band row
-            cells = [rows.nth(i).locator("td").nth(k).inner_text() for k in range(7)]
+            cells = [rows.nth(i).locator("td").nth(k).inner_text() for k in range(5)]
             out[cells[0]] = [c.replace(",", "") for c in cells[1:]]
         return out
 
     tb = tb_rows()
     check("Q1 trial balance rows aggregate per account",
-          tb.get("現金") == ["", "", "10000", "3500", "6500", ""]
-          and tb.get("売上高") == ["", "", "", "10000", "", "10000"]
-          and tb.get("消耗品費") == ["", "", "3000", "", "3000", ""]
-          and tb.get("売上値引") == ["", "", "500", "", "500", ""], str(tb))
-    foot_bs = [pg.locator("#tb-foot-bs td").nth(k).inner_text().replace(",", "") for k in range(7)]
-    foot_pl = [pg.locator("#tb-foot-pl td").nth(k).inner_text().replace(",", "") for k in range(7)]
+          tb.get("現金") == ["", "10000", "3500", "6500"]
+          and tb.get("売上高") == ["", "", "10000", "△10000"]
+          and tb.get("消耗品費") == ["", "3000", "", "3000"]
+          and tb.get("売上値引") == ["", "500", "", "500"], str(tb))
+    foot_bs = [pg.locator("#tb-foot-bs td").nth(k).inner_text().replace(",", "") for k in range(5)]
+    foot_pl = [pg.locator("#tb-foot-pl td").nth(k).inner_text().replace(",", "") for k in range(5)]
     check("Q2 trial balance totals per side (BS left, PL right)",
-          foot_bs == ["合計", "", "", "10000", "3500", "6500", ""]
-          and foot_pl == ["合計", "", "", "3500", "10000", "3500", "10000"],
+          foot_bs == ["合計", "", "10000", "3500", "6500"]
+          and foot_pl == ["合計", "", "3500", "10000", "△6500"],
           str(foot_bs) + " / " + str(foot_pl))
     check("Q3 simple P/L: revenue 9,500 / expense 3,000 / profit 6,500",
           pg.locator("#tb-revenue").inner_text().replace(",", "") == "9500"
@@ -668,7 +698,7 @@ with sync_playwright() as p:
     pg.wait_for_timeout(250)
     tb2 = tb_rows()
     check("Q4 trial balance respects the date range",
-          "売上高" not in tb2 and tb2.get("現金") == ["", "", "", "3500", "", "3500"], str(tb2))
+          "売上高" not in tb2 and tb2.get("現金") == ["", "", "3500", "△3500"], str(tb2))
 
     # ---- R. Total accounts, opening balances, carry-forward (v19/v20) ----
     pg.fill("#tb-from", "2026-04-01")
@@ -692,9 +722,9 @@ with sync_playwright() as p:
     pg.wait_for_timeout(250)
     tb3 = tb_rows()
     check("R1 seeded total rows sum their members in place",
-          tb3.get("流動資産合計") == ["", "", "10000", "3500", "6500", ""]
-          and tb3.get("収益合計") == ["", "", "500", "10000", "", "9500"]
-          and tb3.get("費用合計") == ["", "", "3000", "", "3000", ""], str(tb3))
+          tb3.get("流動資産合計") == ["", "10000", "3500", "6500"]
+          and tb3.get("収益合計") == ["", "500", "10000", "△9500"]
+          and tb3.get("費用合計") == ["", "3000", "", "3000"], str(tb3))
     band_texts = [pg.locator("#tb-body-bs tr.tb-band td, #tb-body-pl tr.tb-band td").nth(i).inner_text()
                   for i in range(pg.locator("#tb-body-bs tr.tb-band td, #tb-body-pl tr.tb-band td").count())]
     check("R1b category bands are shown on the paper",
@@ -720,7 +750,7 @@ with sync_playwright() as p:
     pg.wait_for_timeout(250)
     tb3b = tb_rows()
     check("R1d a user-made total account takes over its members",
-          tb3b.get("現金預金合計") == ["", "", "10000", "3500", "6500", ""]
+          tb3b.get("現金預金合計") == ["", "10000", "3500", "6500"]
           and "流動資産合計" not in tb3b, str(tb3b))
 
     def ob_row(name):
@@ -736,8 +766,8 @@ with sync_playwright() as p:
     pg.wait_for_timeout(300)
     tb4 = tb_rows()
     check("R2 opening balance flows into the closing balance",
-          tb4.get("現金") == ["2000", "", "10000", "3500", "8500", ""]
-          and tb4.get("現金預金合計") == ["2000", "", "10000", "3500", "8500", ""], str(tb4))
+          tb4.get("現金") == ["2000", "10000", "3500", "8500"]
+          and tb4.get("現金預金合計") == ["2000", "10000", "3500", "8500"], str(tb4))
     check("R2b unbalanced opening balances raise a warning",
           "一致していません" in pg.locator("#ob-diff").inner_text(),
           pg.locator("#ob-diff").inner_text())
@@ -749,8 +779,8 @@ with sync_playwright() as p:
           pg.locator("#company-period").inner_text())
     tb5 = tb_rows()
     check("R3b closing balances became the next period's opening balances (profit into 繰越利益剰余金)",
-          tb5.get("現金") == ["8500", "", "", "", "8500", ""]
-          and tb5.get("繰越利益剰余金") == ["", "6500", "", "", "", "6500"], str(tb5))
+          tb5.get("現金") == ["8500", "", "", "8500"]
+          and tb5.get("繰越利益剰余金") == ["△6500", "", "", "△6500"], str(tb5))
 
     c2026 = pg.evaluate("""() => {
       const s = JSON.parse(localStorage.getItem('journalToolStateV1'));
@@ -796,6 +826,43 @@ with sync_playwright() as p:
     check("S3 the scaled sheet still shows both sides' rows",
           sp.locator("#tb-body-bs").inner_text().find("現金") >= 0
           and sp.locator("#tb-body-pl").inner_text().find("売上高") >= 0)
+
+    # S4 sheet-only zoom via the buttons: the sheet grows beyond the
+    # screen width and the frame can pan; 全体表示 returns to fit.
+    fit_label = sp.locator("#tb-zoom-label").inner_text()
+    sp.click("#tb-zoom-in"); sp.wait_for_timeout(200)
+    sp.click("#tb-zoom-in"); sp.wait_for_timeout(200)
+    zoom_box = sp.locator("#tb-paper").bounding_box()
+    zoom_label = sp.locator("#tb-zoom-label").inner_text()
+    frame = sp.evaluate("() => { const w = document.getElementById('tb-fit'); return { sw: w.scrollWidth, cw: w.clientWidth }; }")
+    check("S4 + button zooms only the sheet (grows past the screen, frame pans)",
+          zoom_box is not None and zoom_box["width"] > 420
+          and zoom_label not in ("", fit_label) and frame["sw"] > frame["cw"],
+          f"{zoom_box} / {fit_label} -> {zoom_label} / {frame}")
+    sp.click("#tb-zoom-fit"); sp.wait_for_timeout(200)
+    back_box = sp.locator("#tb-paper").bounding_box()
+    check("S4b 全体表示 returns the sheet to fit-to-width",
+          back_box is not None and back_box["width"] <= 392, f"{back_box}")
+
+    # S5 synthetic two-finger pinch on the sheet widens the sheet scale.
+    sp.evaluate("""() => {
+      const wrap = document.getElementById('tb-fit');
+      const mk = (type, x1, x2) => {
+        if (type === 'touchend') return new TouchEvent(type, { touches: [], bubbles: true, cancelable: true });
+        const t1 = new Touch({ identifier: 1, target: wrap, clientX: x1, clientY: 300 });
+        const t2 = new Touch({ identifier: 2, target: wrap, clientX: x2, clientY: 300 });
+        return new TouchEvent(type, { touches: [t1, t2], bubbles: true, cancelable: true });
+      };
+      wrap.dispatchEvent(mk('touchstart', 150, 250));
+      wrap.dispatchEvent(mk('touchmove', 100, 300));
+      wrap.dispatchEvent(mk('touchend'));
+    }""")
+    sp.wait_for_timeout(200)
+    pinch_box = sp.locator("#tb-paper").bounding_box()
+    pinch_transform = sp.evaluate("() => document.getElementById('tb-paper').style.transform")
+    check("S5 pinch gesture on the sheet zooms the sheet itself",
+          pinch_box is not None and pinch_box["width"] > 420 and pinch_transform.startswith("scale("),
+          f"{pinch_box} / {pinch_transform}")
     sp.close()
 
     b.close()

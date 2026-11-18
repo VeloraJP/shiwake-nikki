@@ -6,8 +6,9 @@ import {
   toObcCSV, collectObcWarnings,
   buildTransferData, shorokuBalance, shorokuSuggestion,
   tokenizeSearch, matchesSearch, journalFlags, verifyGenerated, trialBalance,
-} from './exporters.js?v=24';
-import { encodeSJIS } from './sjis.js?v=24';
+  invoiceDeductionRate,
+} from './exporters.js?v=25';
+import { encodeSJIS } from './sjis.js?v=25';
 
 const STORAGE_KEY = 'journalToolStateV1';
 const FORMAT_LABELS = { transfer: '転送', freee: 'freee', epson: 'エプソン', jdl: 'JDL', yayoi: '弥生', mf: 'MF', pca: 'PCA', obc: '勘定奉行' };
@@ -38,6 +39,25 @@ function defaultTaxes() {
     { id: 'tax-purchase10', name: '課税仕入10%（込）', freeeName: '課対仕入10%', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '課対仕入込10%', mfName: '課税仕入 10%', pcaCode: '', pcaName: '仕入10%', obcCode: '' },
     { id: 'tax-purchase8', name: '課税仕入8%軽減（込）', freeeName: '課対仕入8%（軽）', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '課対仕入込軽減8%', mfName: '課税仕入 (軽)8%', pcaCode: '', pcaName: '仕入8%軽', obcCode: '' },
     { id: 'tax-purchase-exempt', name: '非課税仕入', freeeName: '非課仕入', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '非課仕入', mfName: '非課税仕入', pcaCode: '', pcaName: '非仕入', obcCode: '' },
+    // Transitional-measure records for purchases without a qualified
+    // invoice (v25, 2026-11-18; research: インボイス経過措置_税区分調査
+    // _2026-11-18.md). These are NOT offered in the entry form's tax
+    // selectors: an entry just carries a "nonInvoice" flag and the
+    // exporter swaps the purchase side to the record matching the
+    // deduction rate derived from the entry date. Name-form values are
+    // seeded from official sources (freee's （控80）-style names, Yayoi's
+    // 区分-suffix form, PCA's 略称 — PCA has no 50%/30% categories, so
+    // pcaName stays blank there); all code fields stay blank as usual.
+    { id: 'tax-purchase10-k80', name: '課税仕入10%（込）・経過措置80%', freeeName: '課対仕入（控80）10%', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '課対仕入込10%区分80%', mfName: '課税仕入 10%', pcaCode: '', pcaName: '仕入10%控80', obcCode: '', transitional: true, baseTaxId: 'tax-purchase10', invoiceRate: 80 },
+    { id: 'tax-purchase10-k70', name: '課税仕入10%（込）・経過措置70%', freeeName: '課対仕入（控70）10%', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '課対仕入込10%区分70%', mfName: '課税仕入 10%', pcaCode: '', pcaName: '仕入10%控70', obcCode: '', transitional: true, baseTaxId: 'tax-purchase10', invoiceRate: 70 },
+    { id: 'tax-purchase10-k50', name: '課税仕入10%（込）・経過措置50%', freeeName: '課対仕入（控50）10%', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '課対仕入込10%区分50%', mfName: '課税仕入 10%', pcaCode: '', pcaName: '', obcCode: '', transitional: true, baseTaxId: 'tax-purchase10', invoiceRate: 50 },
+    { id: 'tax-purchase10-k30', name: '課税仕入10%（込）・経過措置30%', freeeName: '課対仕入（控30）10%', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '課対仕入込10%区分30%', mfName: '課税仕入 10%', pcaCode: '', pcaName: '', obcCode: '', transitional: true, baseTaxId: 'tax-purchase10', invoiceRate: 30 },
+    { id: 'tax-purchase10-k0', name: '課税仕入10%（込）・非適格（控除なし）', freeeName: '対象外', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '課対仕入込10%区分控不', mfName: '課税仕入 10%', pcaCode: '', pcaName: '仕入免税等', obcCode: '', transitional: true, baseTaxId: 'tax-purchase10', invoiceRate: 0 },
+    { id: 'tax-purchase8-k80', name: '課税仕入8%軽減（込）・経過措置80%', freeeName: '課対仕入（控80）8%（軽）', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '課対仕入込軽減8%区分80%', mfName: '課税仕入 (軽)8%', pcaCode: '', pcaName: '仕入8%軽控80', obcCode: '', transitional: true, baseTaxId: 'tax-purchase8', invoiceRate: 80 },
+    { id: 'tax-purchase8-k70', name: '課税仕入8%軽減（込）・経過措置70%', freeeName: '課対仕入（控70）8%（軽）', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '課対仕入込軽減8%区分70%', mfName: '課税仕入 (軽)8%', pcaCode: '', pcaName: '仕入8%軽控70', obcCode: '', transitional: true, baseTaxId: 'tax-purchase8', invoiceRate: 70 },
+    { id: 'tax-purchase8-k50', name: '課税仕入8%軽減（込）・経過措置50%', freeeName: '課対仕入（控50）8%（軽）', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '課対仕入込軽減8%区分50%', mfName: '課税仕入 (軽)8%', pcaCode: '', pcaName: '', obcCode: '', transitional: true, baseTaxId: 'tax-purchase8', invoiceRate: 50 },
+    { id: 'tax-purchase8-k30', name: '課税仕入8%軽減（込）・経過措置30%', freeeName: '課対仕入（控30）8%（軽）', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '課対仕入込軽減8%区分30%', mfName: '課税仕入 (軽)8%', pcaCode: '', pcaName: '', obcCode: '', transitional: true, baseTaxId: 'tax-purchase8', invoiceRate: 30 },
+    { id: 'tax-purchase8-k0', name: '課税仕入8%軽減（込）・非適格（控除なし）', freeeName: '対象外', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '課対仕入込軽減8%区分控不', mfName: '課税仕入 (軽)8%', pcaCode: '', pcaName: '仕入免税等', obcCode: '', transitional: true, baseTaxId: 'tax-purchase8', invoiceRate: 0 },
   ];
 }
 
@@ -380,6 +400,7 @@ function renderEntryMasters() {
   }
   syncAccountSelects();
   for (const t of effTaxes(c)) {
+    if (t.transitional) continue; // 経過措置の税区分は出力時に自動で割り当てるため、入力の選択肢に出さない
     for (const sel of [taxSelD, taxSelC]) {
       const o = document.createElement('option'); o.value = t.id; o.textContent = t.name; sel.appendChild(o);
     }
@@ -415,9 +436,11 @@ function clearEntryFields() {
   $('e-credit-name').value = '';
   $('e-amount').value = '';
   $('e-summary').value = '';
+  if ($('e-noninvoice')) $('e-noninvoice').checked = false;
   $('entry-msg').textContent = '';
   $('entry-msg').className = 'msg';
   syncAccountSelects();
+  updateInvoiceUi();
 }
 
 function findAccountByName(c, name) {
@@ -456,6 +479,27 @@ function bindAccountSelect(side) {
 bindAccountSelect('debit');
 bindAccountSelect('credit');
 
+// The "インボイスなし" checkbox (v25) is only meaningful for purchases:
+// show its row when either side's tax category is a taxable purchase,
+// and annotate it with the deduction rate the current date implies.
+function updateInvoiceUi() {
+  const row = $('e-invoice-row');
+  if (!row) return;
+  const isP = (v) => v === 'tax-purchase10' || v === 'tax-purchase8';
+  const show = isP($('e-debit-tax').value) || isP($('e-credit-tax').value);
+  row.hidden = !show;
+  if (!show) return;
+  const d = normalizeDate($('e-date').value);
+  const r = d ? invoiceDeductionRate(d) : null;
+  $('e-invoice-note').textContent = r === null
+    ? '2023年10月1日より前の日付では、経過措置の対象になりません'
+    : r === 0
+      ? 'この日付では「控除なし」として出力されます'
+      : `この日付では${r}%控除として出力されます`;
+}
+$('entry-form').addEventListener('change', updateInvoiceUi);
+$('e-date').addEventListener('input', updateInvoiceUi);
+
 function readEntryForm() {
   const c = company();
   const debit = findAccountByName(c, $('e-debit-name').value);
@@ -470,6 +514,11 @@ function readEntryForm() {
     creditTaxId: $('e-credit-tax').value,
     amount,
     summary: $('e-summary').value.trim(),
+    // Kept only when a taxable purchase is actually involved; a stale
+    // check on a non-purchase entry is dropped here.
+    nonInvoice: !!($('e-noninvoice') && $('e-noninvoice').checked)
+      && ($('e-debit-tax').value === 'tax-purchase10' || $('e-debit-tax').value === 'tax-purchase8'
+        || $('e-credit-tax').value === 'tax-purchase10' || $('e-credit-tax').value === 'tax-purchase8'),
   };
   const errors = [];
   if (data.date === null) errors.push('日付の形式が正しくありません（例: 2026-04-01）');
@@ -493,7 +542,9 @@ function fillEntryForm(j) {
   $('e-credit-tax').value = j.creditTaxId;
   $('e-amount').value = j.amount;
   $('e-summary').value = j.summary || '';
+  if ($('e-noninvoice')) $('e-noninvoice').checked = !!j.nonInvoice;
   syncAccountSelects();
+  updateInvoiceUi();
 }
 
 function applyShorokuPrefill(voucherNo) {
@@ -575,7 +626,9 @@ $('copy-prev').addEventListener('click', () => {
   $('e-credit-tax').value = last.creditTaxId;
   $('e-amount').value = last.amount;
   $('e-summary').value = last.summary || '';
+  if ($('e-noninvoice')) $('e-noninvoice').checked = !!last.nonInvoice;
   syncAccountSelects();
+  updateInvoiceUi();
 });
 
 // Templates
@@ -594,6 +647,7 @@ $('tpl-save').addEventListener('click', () => {
     creditAccountId: data.creditAccountId, creditTaxId: data.creditTaxId,
     amount: Number.isInteger(data.amount) && data.amount > 0 ? data.amount : '',
     summary: data.summary,
+    nonInvoice: !!data.nonInvoice,
   });
   saveState(); renderTemplateList();
   $('entry-msg').textContent = 'テンプレートを保存しました'; $('entry-msg').className = 'msg ok';
@@ -661,10 +715,14 @@ function renderList() {
       fl.strong.length ? `<span class="badge flag-strong" title="${fl.strong.join('／')}">要確認</span>` : '',
       fl.weak.length ? `<span class="badge flag-weak" title="${fl.weak.join('／')}">確認推奨</span>` : '',
     ].join('') : '';
+    const invRate = j.nonInvoice ? invoiceDeductionRate(j.date) : null;
+    const invHtml = invRate !== null
+      ? `<span class="badge invoice" title="インボイスなし（免税事業者等からの仕入）">${invRate === 0 ? '非インボイス 控除なし' : `非インボイス ${invRate}%`}</span>`
+      : '';
     tr.innerHTML = `
       <td>${j.date}</td><td>${j.voucherNo}</td><td>${dn}</td><td>${cn}</td>
       <td class="num">${Number(j.amount).toLocaleString()}</td>
-      <td></td><td>${flagHtml}${exportBadges(j)}</td>
+      <td></td><td>${flagHtml}${invHtml}${exportBadges(j)}</td>
       <td class="row-btns"><button data-act="edit">編集</button> <button data-act="del">削除</button></td>`;
     tr.children[5].textContent = j.summary || '';
     tr.querySelector('[data-act="edit"]').addEventListener('click', () => {
@@ -965,6 +1023,9 @@ function download(filename, blob) {
 function collectWarnings(format, entries) {
   const warnings = [];
   if (format === 'epson') {
+    if (entries.some((e) => e.nonInvoice && e.invoiceRate != null)) {
+      warnings.push('エプソン: 「インボイスなし」の情報はエプソン形式（30列）に載せる欄がないため、ファイルには反映されません。取り込み側で、科目のインボイス区分と伝票日付から自動判定されます');
+    }
     for (const e of entries) {
       for (const side of ['debit', 'credit']) {
         const acc = e[side + 'Account'], tax = e[side + 'Tax'];
@@ -1102,7 +1163,10 @@ $('import-file').addEventListener('change', async () => {
 
 function taxOptions(selectedId) {
   const c = company();
-  return effTaxes(c).map((t) => `<option value="${t.id}" ${t.id === selectedId ? 'selected' : ''}>${t.name}</option>`).join('');
+  // Transitional-measure records are swapped in automatically at export
+  // time; they are never picked directly in a selector.
+  return effTaxes(c).filter((t) => !t.transitional)
+    .map((t) => `<option value="${t.id}" ${t.id === selectedId ? 'selected' : ''}>${t.name}</option>`).join('');
 }
 
 const CATEGORY_LABELS = { asset: '資産', liability: '負債', equity: '純資産', revenue: '収益', expense: '費用' };

@@ -124,6 +124,8 @@ td input, td select { font-size: 13px; padding: 6px 8px; }
 }
 .badge.flag-strong { background: #b91c1c; border-color: #b91c1c; color: #fff; }
 .badge.flag-weak { background: #b45309; border-color: #b45309; color: #fff; }
+.badge.invoice { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+#e-invoice-row[hidden] { display: none; }
 .version { font-size: 12px; font-weight: 400; opacity: 0.65; }
 .verify-table { font-size: 12px; }
 .row-btns { white-space: nowrap; }

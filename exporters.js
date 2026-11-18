@@ -11,18 +11,75 @@
 //   creditTax: { ...same... }
 // }
 
+// ---------- Invoice transitional measure （インボイス経過措置, v25) ----------
+// An entry may carry nonInvoice=true (a purchase without a qualified
+// invoice, e.g. from an exempt business). The deductible percentage is
+// decided by the date of the taxable purchase (NTA Q&A 問113, after the
+// FY2026 reform): the table below is the whole rule — replace it when
+// the law changes. Dates before 2023-10-01 are outside the measure and
+// yield null (the flag then has no effect).
+export function invoiceDeductionRate(dateStr) {
+  const d = String(dateStr || '');
+  if (d < '2023-10-01') return null;
+  if (d <= '2026-09-30') return 80;
+  if (d <= '2028-09-30') return 70;
+  if (d <= '2030-09-30') return 50;
+  if (d <= '2031-09-30') return 30;
+  return 0;
+}
+
+export function taxBaseId(tax) {
+  return (tax && tax.baseTaxId) || (tax && tax.id) || '';
+}
+
+export function isPurchaseTax(tax) {
+  const b = taxBaseId(tax);
+  return b === 'tax-purchase10' || b === 'tax-purchase8';
+}
+
+// Fields that stay identical between a base purchase category and its
+// transitional variants, so a blank on the variant inherits the base
+// value at resolve time. jdlTax and pcaCode are NOT inherited: they are
+// exactly what distinguishes the variant, and a blank there means "not
+// registered" (handled per format with the usual warnings/fallbacks).
+const INVOICE_INHERIT_FIELDS = ['epsonKazei', 'epsonTax', 'jdlKaku', 'obcCode'];
+
+function resolveTax(journal, taxId, rate, taxesById) {
+  const base = taxesById[taxId] || { id: taxId, name: '(不明な税区分)', freeeName: '', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '', mfName: '', pcaCode: '', pcaName: '', obcCode: '' };
+  if (rate === null || !isPurchaseTax(base)) return { tax: base, base };
+  const variant = taxesById[`${taxId}-k${rate}`];
+  if (!variant) return { tax: base, base };
+  const merged = { ...variant, baseTaxId: taxId };
+  for (const f of INVOICE_INHERIT_FIELDS) if (!merged[f]) merged[f] = base[f] || '';
+  return { tax: merged, base };
+}
+
 export function resolveEntry(journal, accountsById, taxesById) {
+  const rate = journal.nonInvoice ? invoiceDeductionRate(journal.date) : null;
+  const d = resolveTax(journal, journal.debitTaxId, rate, taxesById);
+  const c = resolveTax(journal, journal.creditTaxId, rate, taxesById);
   return {
     id: journal.id,
     date: journal.date,
     voucherNo: journal.voucherNo,
     amount: journal.amount,
     summary: journal.summary || '',
+    nonInvoice: !!journal.nonInvoice,
+    invoiceRate: rate,
     debitAccount: accountsById[journal.debitAccountId] || { id: journal.debitAccountId, name: '(不明な科目)', epsonCode: '', jdlCode: '', pcaCode: '', obcCode: '' },
     creditAccount: accountsById[journal.creditAccountId] || { id: journal.creditAccountId, name: '(不明な科目)', epsonCode: '', jdlCode: '', pcaCode: '', obcCode: '' },
-    debitTax: taxesById[journal.debitTaxId] || { id: journal.debitTaxId, name: '(不明な税区分)', freeeName: '', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '', mfName: '', pcaCode: '', pcaName: '', obcCode: '' },
-    creditTax: taxesById[journal.creditTaxId] || { id: journal.creditTaxId, name: '(不明な税区分)', freeeName: '', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '', mfName: '', pcaCode: '', pcaName: '', obcCode: '' },
+    debitTax: d.tax,
+    creditTax: c.tax,
+    debitTaxBase: d.base,
+    creditTaxBase: c.base,
   };
+}
+
+// The transitional rate applying to one side of a resolved entry, or
+// null when the side is not a non-invoice purchase.
+export function sideInvoiceRate(e, side) {
+  if (!e.nonInvoice || e.invoiceRate == null) return null;
+  return isPurchaseTax(e[side + 'Tax']) ? e.invoiceRate : null;
 }
 
 // ---------- CSV helpers ----------
@@ -204,17 +261,31 @@ function isExcludedTax(tax) {
 export function pickJdlTax(e) {
   const dEx = isExcludedTax(e.debitTax);
   const cEx = isExcludedTax(e.creditTax);
-  if (!dEx && !cEx) return { tax: e.debitTax, side: 'debit', bothNonExcluded: true };
-  if (!dEx) return { tax: e.debitTax, side: 'debit', bothNonExcluded: false };
-  if (!cEx) return { tax: e.creditTax, side: 'credit', bothNonExcluded: false };
-  return { tax: e.debitTax, side: 'debit', bothNonExcluded: false };
+  let pick;
+  if (!dEx && !cEx) pick = { tax: e.debitTax, side: 'debit', bothNonExcluded: true };
+  else if (!dEx) pick = { tax: e.debitTax, side: 'debit', bothNonExcluded: false };
+  else if (!cEx) pick = { tax: e.creditTax, side: 'credit', bothNonExcluded: false };
+  else pick = { tax: e.debitTax, side: 'debit', bothNonExcluded: false };
+  // A transitional variant whose JDL 税区 has not been registered cannot
+  // be expressed (a blank 税区 with a 課区 would be malformed), so the
+  // base purchase category is used instead; collectJdlWarnings reports it.
+  const baseTax = pick.side === 'debit' ? e.debitTaxBase : e.creditTaxBase;
+  if (pick.tax && pick.tax.transitional && !pick.tax.jdlTax && baseTax && baseTax !== pick.tax) {
+    return { ...pick, tax: baseTax, fellBack: true };
+  }
+  return pick;
 }
 
 export function collectJdlWarnings(entries) {
   const warnings = [];
   entries.forEach((e, i) => {
-    if (pickJdlTax(e).bothNonExcluded) {
+    const pick = pickJdlTax(e);
+    if (pick.bothNonExcluded) {
       warnings.push(`JDL: ${i + 1}行目（伝票${e.voucherNo}）は借方・貸方とも対象外でない税区分のため、借方側の課区・税区を採用しました`);
+    }
+    if (pick.fellBack) {
+      const label = e.invoiceRate === 0 ? '控除なし' : `経過措置${e.invoiceRate}%`;
+      warnings.push(`JDL: 伝票${e.voucherNo}は${label}の税区が未設定のため、通常の課税仕入として出力しました（税区分マスタで経過措置の税区分に税区を登録すると反映されます）`);
     }
   });
   return warnings;
@@ -351,6 +422,15 @@ export function collectMfWarnings(entries) {
   return [...new Set(warnings)];
 }
 
+// The インボイス column values per MF's official import guide (the guide
+// prints the percent sign full-width: "80％控除". Whether the full-width
+// or half-width form is the exact match is unverified — see the research
+// memo インボイス経過措置_税区分調査_2026-11-18.md).
+export function mfInvoiceText(rate) {
+  if (rate == null) return '';
+  return rate === 0 ? '控除なし' : `${rate}％控除`;
+}
+
 export function mfRow(e) {
   const cols = new Array(MF_COLUMNS.length).fill('');
   cols[0] = String(e.voucherNo);              // 取引No (= 伝票番号)
@@ -358,13 +438,13 @@ export function mfRow(e) {
   cols[2] = sanitizeMfText(e.debitAccount.name);  // 借方勘定科目 (名称で照合)
   // cols[3] 借方補助科目 / cols[4] 借方部門 / cols[5] 借方取引先: blank
   cols[6] = sanitizeMfText(e.debitTax.mfName || ''); // 借方税区分 (正式名称)
-  // cols[7] 借方インボイス: blank (= 適格と判定される)
+  cols[7] = mfInvoiceText(sideInvoiceRate(e, 'debit')); // 借方インボイス (空欄 = 適格)
   cols[8] = String(e.amount);                  // 借方金額(円) (税込)
   // cols[9] 借方税額: blank (税額は取り込まれない。公式指示は「0」または空欄)
   cols[10] = sanitizeMfText(e.creditAccount.name); // 貸方勘定科目
   // cols[11] 貸方補助科目 / cols[12] 貸方部門 / cols[13] 貸方取引先: blank
   cols[14] = sanitizeMfText(e.creditTax.mfName || ''); // 貸方税区分
-  // cols[15] 貸方インボイス: blank
+  cols[15] = mfInvoiceText(sideInvoiceRate(e, 'credit')); // 貸方インボイス
   cols[16] = String(e.amount);                 // 貸方金額(円) (税込)
   // cols[17] 貸方税額: blank
   cols[18] = sanitizeMfText(e.summary);        // 摘要
@@ -504,13 +584,19 @@ export function collectObcWarnings(entries) {
 // 補助科目コード, 税区分コード, 税率種別, 税率, 事業区分コード,
 // 消費税計算, 端数処理, インボイス取引区分, 控除割合, 取引先コード,
 // 本体金額, 消費税額, 外貨コード, レート, 外貨本体金額, 外貨消費税額.
-function obcSide(cols, base, account, tax, amount) {
+function obcSide(cols, base, account, tax, amount, invRate) {
   const rate = obcTaxRate(tax);
   cols[base + 1] = account.obcCode || '';         // 勘定科目コード
   cols[base + 3] = tax.obcCode || '';             // 税区分コード
   cols[base + 4] = rate ? (rate === 8 ? '1' : '0') : ''; // 税率種別: 0 = 標準 / 1 = 軽減
   cols[base + 5] = rate ? String(rate) : '';      // 税率
   cols[base + 7] = rate ? '2' : '0';              // 消費税計算: 2 = 税込金額からの計算 / 0 = しない
+  if (invRate != null) {
+    // インボイス取引区分 (base + 9): 1 = 免税事業者等から購入。
+    // 控除割合 (base + 10): 80/70/50/30, 控除なしは 0。
+    cols[base + 9] = '1';
+    cols[base + 10] = String(invRate);
+  }
   cols[base + 12] = String(amount);               // 本体金額 (税込金額を入れる)
   // 消費税額 (base + 13) stays blank: with 消費税計算 = 2 the importer
   // calculates the tax amount itself.
@@ -527,8 +613,8 @@ export function obcRow(e, isFirstOfVoucher) {
   cols[11] = '0';                                 // 整理区分: 0 = 日常仕訳
   cols[12] = String(e.voucherNo);                 // 伝票No
   // cols[13] 伝票入力形式: blank = 通常入力
-  obcSide(cols, 14, e.debitAccount, e.debitTax, e.amount);   // 借方 O..AF
-  obcSide(cols, 32, e.creditAccount, e.creditTax, e.amount); // 貸方 AG..AX
+  obcSide(cols, 14, e.debitAccount, e.debitTax, e.amount, sideInvoiceRate(e, 'debit'));   // 借方 O..AF
+  obcSide(cols, 32, e.creditAccount, e.creditTax, e.amount, sideInvoiceRate(e, 'credit')); // 貸方 AG..AX
   cols[50] = e.summary;                           // 摘要 (CSJS100)
   // cols[51] 付箋色 / cols[52] 付箋文字: blank
   return cols;

@@ -11,6 +11,7 @@ import {
   toObcCSV, OBC_COLUMN_COUNT, collectObcWarnings, obcTaxRate,
   shorokuBalance, shorokuSuggestion,
   parseCsv, tokenizeSearch, matchesSearch, journalFlags, verifyGenerated, trialBalance,
+  invoiceDeductionRate,
 } from '../exporters.js';
 import { encodeSJIS } from '../sjis.js';
 
@@ -673,11 +674,22 @@ test('defaults: codes start blank; name-form tax values stay seeded (2026-11-13 
   }
   assert.ok(accBlock.includes("epsonCode: '', jdlCode: ''") && accBlock.includes("pcaCode: '', obcCode: ''"),
     'account code fields are built blank');
-  // Taxes: every code/number field is blank in all 7 rows.
+  // Taxes: every code/number field is blank in all rows (7 base rows +
+  // the 10 transitional-measure rows added in v25).
   for (const f of ['epsonKazei', 'epsonTax', 'jdlKaku', 'jdlTax', 'pcaCode', 'obcCode']) {
     assert.ok(!new RegExp(`${f}: '[^']`).test(taxBlock), `${f} has no seeded value`);
-    assert.strictEqual((taxBlock.match(new RegExp(`${f}: ''`, 'g')) || []).length, 7, `${f} blank in all 7 rows`);
+    assert.strictEqual((taxBlock.match(new RegExp(`${f}: ''`, 'g')) || []).length, 17, `${f} blank in all 17 rows`);
   }
+  // Transitional rows (v25): 10 records, marked and pointing at their
+  // base purchase category, with the official name-form values seeded.
+  assert.strictEqual((taxBlock.match(/transitional: true/g) || []).length, 10, '10 transitional records');
+  for (const n of ['課対仕入（控80）10%', '課対仕入（控70）8%（軽）', '課対仕入（控50）10%', '課対仕入（控30）8%（軽）']) {
+    assert.ok(taxBlock.includes(`freeeName: '${n}'`), `transitional freeeName seed: ${n}`);
+  }
+  assert.ok(taxBlock.includes("yayoiName: '課対仕入込10%区分70%'"), 'transitional yayoi suffix form');
+  assert.ok(taxBlock.includes("yayoiName: '課対仕入込軽減8%区分控不'"), 'transitional yayoi 控不 form');
+  assert.ok(taxBlock.includes("pcaName: '仕入10%控80'"), 'transitional pcaName seed');
+  assert.ok(taxBlock.includes("pcaName: '仕入免税等'"), 'transitional pcaName for no deduction');
   // Taxes: freee names are freee's official tax-category names (kept).
   for (const n of ['課税売上10%', '課税売上8%（軽）', '課対仕入10%', '課対仕入8%（軽）', '非課売上', '非課仕入']) {
     assert.ok(taxBlock.includes(`freeeName: '${n}'`), `freeeName seed: ${n}`);
@@ -869,6 +881,9 @@ test('trial balance: opening balances, closing balances and total accounts (v19)
     [tb.totalRows[0].name, tb.totalRows[0].openingDebit, tb.totalRows[0].openingCredit, tb.totalRows[0].debit, tb.totalRows[0].closingDebit, tb.totalRows[0].closingCredit],
     ['流動資産合計', 4700, 0, 1000, 5700, 0],
     'total row: balances are net of contra accounts, period totals are gross');
+  assert.strictEqual(byName['現金'].closingBalance, 6000, 'signed balance: debit balance is positive');
+  assert.strictEqual(byName['資本金'].closingBalance, -4700, 'signed balance: credit balance is negative');
+  assert.strictEqual(tb.totalRows[0].closingBalance, 5700, 'total row signed balance is the net');
   assert.deepStrictEqual(tb.displayRows.map((r) => r.name),
     ['現金', '貸倒引当金', '流動資産合計', '資本金', '売上高'],
     'display rows interleave each total right after its last member');
@@ -877,6 +892,116 @@ test('trial balance: opening balances, closing balances and total accounts (v19)
   assert.strictEqual(tb.totalOpeningCredit, 5000);
   assert.strictEqual(tb.totalClosingDebit, tb.totalClosingCredit, 'closing totals agree when opening is balanced plus balanced journals');
   assert.strictEqual(tb.profit, 1000);
+});
+
+// ---------- Invoice transitional measure (v25) ----------
+const invTaxes = {
+  'tax-excluded': { id: 'tax-excluded', name: '対象外', freeeName: '対象外', epsonKazei: '00', epsonTax: '', jdlKaku: '00', jdlTax: '0', yayoiName: '対象外', mfName: '対象外', pcaCode: '00', pcaName: '対象外', obcCode: '0000' },
+  'tax-purchase10': { id: 'tax-purchase10', name: '課税仕入10%（込）', freeeName: '課対仕入10%', epsonKazei: '32', epsonTax: '10', jdlKaku: '31', jdlTax: '3', yayoiName: '課対仕入込10%', mfName: '課税仕入 10%', pcaCode: 'Q5', pcaName: '仕入10%', obcCode: '0010' },
+  'tax-purchase10-k80': { id: 'tax-purchase10-k80', name: '課税仕入10%（込）・経過措置80%', freeeName: '課対仕入（控80）10%', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '課対仕入込10%区分80%', mfName: '課税仕入 10%', pcaCode: '', pcaName: '仕入10%控80', obcCode: '', transitional: true, baseTaxId: 'tax-purchase10', invoiceRate: 80 },
+  'tax-purchase10-k70': { id: 'tax-purchase10-k70', name: '課税仕入10%（込）・経過措置70%', freeeName: '課対仕入（控70）10%', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '73', yayoiName: '課対仕入込10%区分70%', mfName: '課税仕入 10%', pcaCode: 'QI', pcaName: '仕入10%控70', obcCode: '', transitional: true, baseTaxId: 'tax-purchase10', invoiceRate: 70 },
+  'tax-purchase10-k0': { id: 'tax-purchase10-k0', name: '課税仕入10%（込）・非適格（控除なし）', freeeName: '対象外', epsonKazei: '', epsonTax: '', jdlKaku: '', jdlTax: '', yayoiName: '課対仕入込10%区分控不', mfName: '課税仕入 10%', pcaCode: 'Q0', pcaName: '仕入免税等', obcCode: '', transitional: true, baseTaxId: 'tax-purchase10', invoiceRate: 0 },
+};
+const invResolve = (j) => resolveEntry(j, accountsById, invTaxes);
+const buyBase = { id: 'i1', voucherNo: 31, debitAccountId: 'supplies', debitTaxId: 'tax-purchase10', creditAccountId: 'cash', creditTaxId: 'tax-excluded', amount: 11000, summary: '免税事業者からの仕入' };
+const buy70 = invResolve({ ...buyBase, date: '2027-05-10', nonInvoice: true });
+
+test('invoice: deduction rate follows the statutory date table', () => {
+  assert.strictEqual(invoiceDeductionRate('2023-09-30'), null);
+  assert.strictEqual(invoiceDeductionRate('2023-10-01'), 80);
+  assert.strictEqual(invoiceDeductionRate('2026-09-30'), 80);
+  assert.strictEqual(invoiceDeductionRate('2026-10-01'), 70);
+  assert.strictEqual(invoiceDeductionRate('2028-09-30'), 70);
+  assert.strictEqual(invoiceDeductionRate('2028-10-01'), 50);
+  assert.strictEqual(invoiceDeductionRate('2030-09-30'), 50);
+  assert.strictEqual(invoiceDeductionRate('2030-10-01'), 30);
+  assert.strictEqual(invoiceDeductionRate('2031-09-30'), 30);
+  assert.strictEqual(invoiceDeductionRate('2031-10-01'), 0);
+});
+
+test('invoice: resolve swaps the purchase side to the transitional record and inherits base fields', () => {
+  assert.strictEqual(buy70.invoiceRate, 70);
+  assert.strictEqual(buy70.debitTax.id, 'tax-purchase10-k70');
+  assert.strictEqual(buy70.debitTax.jdlKaku, '31', '課区 is inherited from the base category');
+  assert.strictEqual(buy70.debitTax.obcCode, '0010', 'OBC tax code is inherited from the base category');
+  assert.strictEqual(buy70.debitTax.jdlTax, '73', '税区 is NOT inherited: the variant value is used');
+  assert.strictEqual(buy70.debitTaxBase.id, 'tax-purchase10');
+  assert.strictEqual(buy70.creditTax.id, 'tax-excluded', 'the non-purchase side is untouched');
+  const plain = invResolve({ ...buyBase, date: '2027-05-10' });
+  assert.strictEqual(plain.debitTax.id, 'tax-purchase10', 'no flag, no swap');
+  assert.strictEqual(plain.invoiceRate, null);
+  const early = invResolve({ ...buyBase, date: '2023-04-01', nonInvoice: true });
+  assert.strictEqual(early.invoiceRate, null, 'before 2023-10-01 the measure does not apply');
+  assert.strictEqual(early.debitTax.id, 'tax-purchase10');
+});
+
+test('invoice: freee uses the （控70）name and the no-deduction variant resolves to 対象外', () => {
+  assert.ok(toFreeeCSV([buy70]).includes('課対仕入（控70）10%'));
+  const buyNone = invResolve({ ...buyBase, date: '2032-02-01', nonInvoice: true });
+  assert.strictEqual(buyNone.debitTax.id, 'tax-purchase10-k0');
+  assert.strictEqual(buyNone.debitTax.freeeName, '対象外');
+});
+
+test('invoice: yayoi appends the 区分 suffix and the tax amount still uses the base rate', () => {
+  const cols = parseCsvLine(toYayoiCSV([buy70]).trimEnd().split('\r\n')[0]);
+  assert.strictEqual(cols[7], '課対仕入込10%区分70%');
+  assert.strictEqual(cols[9], '1000', '内税額 is computed at 10% regardless of the deduction rate');
+});
+
+test('invoice: MF writes the deduction into the invoice column, tax name unchanged', () => {
+  const rows = parseCsv(toMfCSV([buy70]));
+  assert.strictEqual(rows[1][6], '課税仕入 10%');
+  assert.strictEqual(rows[1][7], '70％控除');
+  const plain = invResolve({ ...buyBase, date: '2027-05-10' });
+  assert.strictEqual(parseCsv(toMfCSV([plain]))[1][7], '', 'no flag means blank (= 適格)');
+  const buyNone = invResolve({ ...buyBase, date: '2032-02-01', nonInvoice: true });
+  assert.strictEqual(parseCsv(toMfCSV([buyNone]))[1][7], '控除なし');
+});
+
+test('invoice: OBC sets インボイス取引区分=1 and the rate in the dedicated columns', () => {
+  const cols = parseCsvLine(toObcCSV([buy70]).trimEnd().split('\r\n')[0]);
+  assert.strictEqual(cols[17], '0010', 'tax code stays the base code (inherited)');
+  assert.strictEqual(cols[23], '1', 'debit インボイス取引区分 (X column)');
+  assert.strictEqual(cols[24], '70', 'debit 控除割合 (Y column)');
+  const buyNone = invResolve({ ...buyBase, date: '2032-02-01', nonInvoice: true });
+  const cols0 = parseCsvLine(toObcCSV([buyNone]).trimEnd().split('\r\n')[0]);
+  assert.strictEqual(cols0[23], '1');
+  assert.strictEqual(cols0[24], '0', 'no deduction is rate 0');
+});
+
+test('invoice: PCA swaps to the transitional code QI with its 略称', () => {
+  const rows = parseCsv(toPcaCSV([buy70]));
+  assert.strictEqual(rows[1][11], 'QI');
+  assert.strictEqual(rows[1][12], '仕入10%控70');
+  assert.strictEqual(rows[1][14], '1000', '消費税額 is the full 内税額 at 10%');
+});
+
+test('invoice: JDL swaps only the 税区 when registered, and falls back with a warning when not', () => {
+  const lines = toJdlCSV([buy70]).trimEnd().split('\r\n');
+  const cols = parseCsvLine(lines[1]);
+  assert.strictEqual(cols[13], '31', '課区 stays the base purchase 課区');
+  assert.strictEqual(cols[15], '73', '税区 is the registered transitional code');
+  assert.ok(!collectJdlWarnings([buy70]).some((w) => w.includes('経過措置')), 'no fallback warning when registered');
+  const buy80 = invResolve({ ...buyBase, date: '2026-04-10', nonInvoice: true });
+  const pick = pickJdlTax(buy80);
+  assert.strictEqual(pick.fellBack, true, 'unregistered 税区 falls back to the base category');
+  assert.strictEqual(pick.tax.id, 'tax-purchase10');
+  const cols80 = parseCsvLine(toJdlCSV([buy80]).trimEnd().split('\r\n')[1]);
+  assert.strictEqual(cols80[15], '3', 'the base 税区 is output on fallback');
+  assert.ok(collectJdlWarnings([buy80]).some((w) => w.includes('経過措置80%')), 'the fallback is reported');
+});
+
+test('invoice: epson output is identical with and without the flag (the format cannot carry it)', () => {
+  const plain = invResolve({ ...buyBase, date: '2027-05-10' });
+  assert.strictEqual(toEpsonCSV([buy70]), toEpsonCSV([plain]));
+});
+
+test('invoice: generated files still pass the reload verification', () => {
+  const gens = { epson: toEpsonCSV, jdl: toJdlCSV, freee: toFreeeCSV, yayoi: toYayoiCSV, mf: toMfCSV, pca: toPcaCSV, obc: toObcCSV };
+  for (const [fmt, gen] of Object.entries(gens)) {
+    const r = verifyGenerated(fmt, gen([buy70]), [buy70]);
+    assert.ok(r.ok, `${fmt}: ${r.errors.join('; ')}`);
+  }
 });
 
 console.log(`\nAll ${passed} tests passed.`);

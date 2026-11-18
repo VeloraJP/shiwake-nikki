@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="light">
 <title>汎用仕訳日記帳</title>
-<link rel="stylesheet" href="style.css?v=24">
+<link rel="stylesheet" href="style.css?v=25">
 </head>
 <body>
 <header>
-  <h1>仕訳日記帳 <span class="version">v24</span></h1>
+  <h1>仕訳日記帳 <span class="version">v25</span></h1>
   <div class="company-switch">
     <label for="company-select">会社</label>
     <select id="company-select"></select>
@@ -75,6 +75,10 @@
         <label>摘要
           <input type="text" id="e-summary" placeholder="摘要">
         </label>
+      </div>
+      <div class="grid" id="e-invoice-row" hidden>
+        <label><input type="checkbox" id="e-noninvoice"> インボイスなし（免税事業者等からの仕入）</label>
+        <p class="muted" id="e-invoice-note"></p>
       </div>
       <p id="entry-msg" class="msg"></p>
       <div class="btn-row">
@@ -249,13 +253,13 @@
       <table class="verify-table">
         <thead><tr><th>形式</th><th>根拠</th><th>実機検証</th><th>主な未確認点</th></tr></thead>
         <tbody>
-          <tr><td>freee</td><td>公開テンプレートの並び（[表題行]／[明細行]）</td><td>未実施</td><td>テンプレート実物との列順の完全照合</td></tr>
-          <tr><td>エプソン財務会計</td><td>実績のある30列の並び</td><td>未実施</td><td>課税仕入パターンとK8表記の取り込み可否</td></tr>
-          <tr><td>JDL</td><td>実績のある16列の並び</td><td>未実施</td><td>日付表記と番号の開始値</td></tr>
-          <tr><td>弥生会計</td><td>公開資料「仕訳データの項目と記述形式」の並び</td><td>未実施</td><td>文字コードの公式明記がないためShift_JISで出力</td></tr>
-          <tr><td>マネーフォワード</td><td>公開資料「『仕訳帳』をインポートする」の並び</td><td>未実施</td><td>文字コードの公式明記がないためShift_JISで出力</td></tr>
-          <tr><td>PCA会計</td><td>公開資料『汎用データレイアウト』の並び</td><td>未実施</td><td>項目名の部分集合（先頭30列）での自動判定受入</td></tr>
-          <tr><td>勘定奉行</td><td>公開資料（サポート技術情報・ヘルプの形式表）で確認した並び</td><td>未実施</td><td>勘定奉行クラウドでOBC受入形式がそのまま使えるか</td></tr>
+          <tr><td>freee</td><td>公開テンプレートの並び（[表題行]／[明細行]）</td><td>未実施</td><td>テンプレート実物との列順の完全照合／経過措置の税区分は「買い手側対応機能」が有効な事業所のみ存在</td></tr>
+          <tr><td>エプソン財務会計</td><td>実績のある30列の並び</td><td>未実施</td><td>課税仕入パターンとK8表記の取り込み可否／インボイス情報はこの形式に載らない（取り込み側で自動判定）</td></tr>
+          <tr><td>JDL</td><td>実績のある16列の並び</td><td>未実施</td><td>日付表記と番号の開始値／経過措置の税区は80%・70%のみ存在（50%・30%・控除なし用はない）</td></tr>
+          <tr><td>弥生会計</td><td>公開資料「仕訳データの項目と記述形式」の並び</td><td>未実施</td><td>文字コードの公式明記がないためShift_JISで出力／経過措置の「区分○○%」付加は公式の内税形式の例からの読み替え</td></tr>
+          <tr><td>マネーフォワード</td><td>公開資料「『仕訳帳』をインポートする」の並び</td><td>未実施</td><td>文字コードの公式明記がないためShift_JISで出力／インボイス列の「％」は全角・半角のどちらが完全一致か未確認</td></tr>
+          <tr><td>PCA会計</td><td>公開資料『汎用データレイアウト』の並び</td><td>未実施</td><td>項目名の部分集合（先頭30列）での自動判定受入／経過措置のコードは80%・70%・控除なしのみ存在</td></tr>
+          <tr><td>勘定奉行</td><td>公開資料（サポート技術情報・ヘルプの形式表）で確認した並び</td><td>未実施</td><td>勘定奉行クラウドでOBC受入形式がそのまま使えるか／インボイス取引区分・控除割合の値定義はfreee公式の形式表が根拠</td></tr>
         </tbody>
       </table>
     </div>
@@ -303,6 +307,7 @@
     </div>
 
     <h2>税区分</h2>
+    <p class="muted">「経過措置○○%」「非適格（控除なし）」の税区分は、仕訳入力で「インボイスなし」にチェックした課税仕入に、仕訳の日付から自動で割り当てられるものです。入力画面の選択肢には出てきません。JDLの税区・PCAの税区分コードなど、必要なコードはここで登録してください（JDLの税区は80%＝71（軽減は70）、70%＝73（軽減は72）。PCAは80%＝QD（軽減はQE）、70%＝QI（軽減はQJ）、控除なし＝Q0が公式のコードです）。</p>
     <div class="table-wrap">
       <table id="tax-table">
         <thead>
@@ -347,6 +352,6 @@
 
 <footer class="muted">データはこの端末の中（localStorage）にだけ保存されます。サーバーには送信されません。</footer>
 
-<script type="module" src="app.js?v=24"></script>
+<script type="module" src="app.js?v=25"></script>
 </body>
 </html>
